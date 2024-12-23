@@ -39,7 +39,8 @@ SyncBridge is a modern data synchronization platform that enables seamless devic
 
 Create a `.env` file in the root directory:
 env
-Database Configuration
+``
+`Database Configuration`
 DB_HOST=localhost
 DB_PORT=5432
 DB_USERNAME=postgres
@@ -60,6 +61,7 @@ SUPPORT_EMAIL=support@syncbridge.com
 Application Configuration
 PORT=3500
 FRONTEND_URL=http://localhost:3000
+``
 
 3. **Start the database**
    bash
@@ -80,6 +82,7 @@ FRONTEND_URL=http://localhost:3000
 5. **Install dependencies**
    bash
    npm install
+   pnpm install(im using pnpm)
    or
    yarn install
 6. **Start the application**
@@ -93,14 +96,75 @@ npm run start:prod
 
 ## 🗄️ Database Schema
 
-### Key Entities:
+### Core Entities:
 
-- Users
-- Devices
-- Device Authentications
-- Security Events
-- Sync Data
-- Storage Quotas
+#### 👤 Users
+- Primary user account information
+- Email and authentication details
+- Account status and subscription management
+- Storage quota tracking
+- Language and timezone preferences
+
+#### 📱 Devices
+- Device identification and type
+- Operating system and browser information
+- Sync preferences and settings
+- Activity tracking
+- Authentication status
+
+#### 🔄 Sync Data
+- Multi-type content support (Text, File, Image, URL, Note, Task)
+- Version control and conflict management
+- Metadata and encryption
+- Size and checksum tracking
+- Parent-child relationship support
+
+#### 📋 Clipboard History
+- Multi-format clipboard content (Text, Image, File, URL, HTML, RTF)
+- Source device tracking
+- Favorites and expiration management
+- Size and checksum verification
+
+#### 📚 Reading Progress
+- Content position tracking
+- Completion status
+- Device-specific progress
+- Metadata storage
+
+### Management Entities:
+
+#### 🔐 Device Authentication
+- Refresh token management
+- Expiration tracking
+- Revocation handling
+- IP tracking
+
+#### 👥 Device Groups
+- Group management and settings
+- Device membership tracking
+- Sync settings per group
+- Hierarchical device organization
+
+#### 🛡️ Security Events
+- Comprehensive security logging
+- Event severity tracking
+- IP tracking
+- Resolution management
+
+#### ⚡ Sync Status
+- Sync state management
+- Conflict resolution strategies
+- Error tracking and retry management
+- Version control
+
+### Key Features:
+
+- **Relationships**: Robust entity relationships with proper foreign key constraints
+- **Audit Trail**: Comprehensive timestamp tracking across entities
+- **Data Integrity**: Checksums and version control
+- **Security**: Built-in security event tracking and device authentication
+- **Flexibility**: JSON storage for metadata and settings
+- **Scalability**: Efficient indexing and unique constraints
 
 ## 🔒 API Authentication
 
@@ -139,32 +203,14 @@ Automated emails for:
 - Security alerts
 - Subscription updates
 
-## 📦 Project Structure
-
-syncbridge/
-├── apps/
-│ ├── api/
-│ │ ├── src/
-│ │ │ ├── modules/
-│ │ │ ├── entities/
-│ │ │ ├── config/
-│ │ │ └── main.ts
-│ │ └── test/
-│ └── web/
-├── packages/
-└── docker/
 
 ## 🤝 Contributing
-
 1. Fork the repository
 2. Create your feature branch
 3. Commit your changes
 4. Push to the branch
 5. Create a Pull Request
 
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 👥 Authors
 

@@ -14,6 +14,18 @@ interface QRStatus {
   deviceId?: string;
 }
 
+interface QRAuthResponse {
+  access_token: string;
+  refresh_token: string;
+  device_id: string;
+  user: {
+    id: string;
+    email: string;
+    username: string;
+    full_name: string;
+  };
+}
+
 export const qrService = {
   async generateQR(): Promise<QRResponse> {
     const response = await api.get<QRResponse>("/auth/qr/generate");
@@ -27,8 +39,16 @@ export const qrService = {
 
   async authenticateQR(
     qrId: string,
-    deviceInfo: { name: string }
-  ): Promise<void> {
-    await api.post("/auth/qr/authenticate", { qrId, deviceInfo });
+    deviceInfo: {
+      name: string;
+      userAgent: string;
+      ipAddress: string;
+    }
+  ): Promise<QRAuthResponse> {
+    const response = await api.post<QRAuthResponse>("/auth/qr/authenticate", {
+      qrId,
+      deviceInfo,
+    });
+    return response.data;
   },
 };

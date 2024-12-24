@@ -155,13 +155,21 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async authenticateQR(
     @Req() req,
-    @Body() data: { qrId: string; deviceInfo: { name: string } },
+    @Body()
+    data: {
+      qrId: string;
+      deviceInfo: {
+        name: string;
+        userAgent: string;
+        ipAddress: string;
+      };
+    },
   ) {
-    await this.authService.authenticateQRLogin(
+    const response = await this.authService.authenticateQRLogin(
       data.qrId,
-      req.user.id,
+      req.user.user_id,
       data.deviceInfo,
     );
-    return { message: 'Device paired successfully' };
+    return response;
   }
 }

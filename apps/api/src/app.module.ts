@@ -10,6 +10,8 @@ import { SyncData } from './entities/sync-data.entity';
 import { DeviceAuthentication } from './entities/device-auth.entity';
 import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
+import { WsModule } from './modules/ws/ws.module';
+import { DevicesModule } from './modules/devices/devices.module';
 
 @Module({
   imports: [
@@ -37,7 +39,9 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
       }),
       inject: [ConfigService],
     }),
+    WsModule,
     AuthModule,
+    DevicesModule,
   ],
   providers: [
     {

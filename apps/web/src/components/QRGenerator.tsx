@@ -9,9 +9,9 @@ export function QRGenerator() {
   const [error, setError] = useState<string>();
   const [isExpired, setIsExpired] = useState(false);
   const [timeLeft, setTimeLeft] = useState(300); // 5 minutes in seconds
-  const regenerateTimeoutRef = useRef<NodeJS.Timeout>();
-  const expiryTimeoutRef = useRef<NodeJS.Timeout>();
-  const timerIntervalRef = useRef<NodeJS.Timer>();
+  const regenerateTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const expiryTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval>>();
 
   const generateQR = async () => {
     try {
@@ -118,8 +118,18 @@ export function QRGenerator() {
         </div>
       ) : qrData ? (
         <div className="flex flex-col items-center gap-2">
-          <div className="p-4 bg-white rounded-lg">
-            <QRCodeSVG value={qrData.qrCode} size={200} />
+          <div className="p-8 bg-white rounded-lg">
+            <QRCodeSVG 
+              value={qrData.qrCode} 
+              size={300}
+              level="M"
+              includeMargin={true}
+              bgColor="#FFFFFF"
+              fgColor="#000000"
+              style={{
+                imageRendering: "pixelated",
+              }}
+            />
           </div>
           <div className="flex flex-col items-center gap-1">
             <p className="text-sm text-muted-foreground">

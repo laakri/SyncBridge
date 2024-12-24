@@ -2,14 +2,33 @@ import { NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     logger: ['error', 'warn', 'log', 'debug'],
   });
 
+  // WebSocket configuration
+  app.useWebSocketAdapter(new IoAdapter(app));
+
   // Validation pipe
   app.useGlobalPipes(new ValidationPipe());
+
+  // CORS
+  app.enableCors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'refresh-token',
+      'device-id',
+      'Access-Control-Allow-Headers',
+      'Access-Control-Allow-Origin',
+    ],
+  });
 
   // Swagger setup
   const config = new DocumentBuilder()
@@ -25,21 +44,6 @@ async function bootstrap() {
 
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api-docs', app, document);
-
-  // CORS
-  app.enableCors({
-    origin: process.env.WEB_URL || 'http://localhost:3000',
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: [
-      'Content-Type',
-      'Authorization',
-      'refresh-token',
-      'device-id',
-      'Access-Control-Allow-Headers',
-      'Access-Control-Allow-Origin',
-    ],
-  });
 
   await app.listen(process.env.PORT ?? 3500);
   console.log(`Application is running on: ${await app.getUrl()}`);

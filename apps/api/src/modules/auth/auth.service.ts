@@ -202,7 +202,7 @@ export class AuthService {
           email: user.email,
           device_id: device.device_id,
         },
-        { expiresIn: '10s' },
+        { expiresIn: '15m' },
       ),
       this.jwtService.signAsync(
         {
@@ -512,8 +512,22 @@ export class AuthService {
   async authenticateQRLogin(
     qrId: string,
     authenticatingUserId: string,
-    deviceInfo: { name: string },
-  ): Promise<void> {
+    clientInfo: {
+      name: string;
+      userAgent: string;
+      ipAddress: string;
+    },
+  ): Promise<{
+    access_token: string;
+    refresh_token: string;
+    device_id: string;
+    user: {
+      id: string;
+      email: string;
+      username: string;
+      full_name: string;
+    };
+  }> {
     // Get QR session data
     const sessionData = await this.redis.get(`qr_login:${qrId}`);
     if (!sessionData) {
@@ -527,12 +541,26 @@ export class AuthService {
       throw new UnauthorizedException('This QR code belongs to another user');
     }
 
-    // Rest of your device creation logic...
-    const device = await this.deviceRepository.create({
-      user_id: authenticatingUserId,
-      device_name: deviceInfo.name,
-      // ... other device info
+    // Get user data
+    const user = await this.userRepository.findOne({
+      where: { user_id: authenticatingUserId },
     });
+
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    // Parse user agent and create/get device
+    const deviceInfo = parseUserAgent(clientInfo.userAgent);
+    const device = await this.handleDeviceLogin(
+      user,
+      clientInfo.name,
+      clientInfo.ipAddress,
+      clientInfo.userAgent,
+    );
+
+    // Generate tokens for the device
+    const tokens = await this.generateTokens(user, device);
 
     // Update QR session status
     await this.redis.set(
@@ -546,6 +574,17 @@ export class AuthService {
       'EX',
       30, // Short expiration after auth
     );
+
+    return {
+      ...tokens,
+      device_id: device.device_id,
+      user: {
+        id: user.user_id,
+        email: user.email,
+        username: user.username,
+        full_name: user.full_name,
+      },
+    };
   }
 
   async findDeviceById(deviceId: string): Promise<Device | null> {

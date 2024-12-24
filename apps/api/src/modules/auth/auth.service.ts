@@ -593,4 +593,17 @@ export class AuthService {
       select: ['device_id', 'user_id', 'device_name', 'is_active'],
     });
   }
+
+  async updateDeviceStatus(
+    deviceId: string,
+    isConnected: boolean,
+  ): Promise<void> {
+    await this.deviceRepository.update(
+      { device_id: deviceId },
+      {
+        is_connected: isConnected,
+        last_active: new Date(),
+      },
+    );
+  }
 }

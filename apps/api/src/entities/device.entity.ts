@@ -7,6 +7,7 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  Unique,
 } from 'typeorm';
 import { User } from './user.entity';
 import { DeviceAuthentication } from './device-auth.entity';
@@ -30,6 +31,7 @@ export enum OSType {
 }
 
 @Entity('devices')
+@Unique(['user_id', 'device_token'])
 export class Device {
   @PrimaryGeneratedColumn('uuid')
   device_id: string;
@@ -60,7 +62,7 @@ export class Device {
   @Column({ nullable: true })
   last_ip_address: string;
 
-  @Column({ unique: true })
+  @Column()
   device_token: string;
 
   @Column({ type: 'jsonb', default: {} })
@@ -86,6 +88,9 @@ export class Device {
 
   @Column({ type: 'timestamp', nullable: true })
   last_active: Date;
+
+  @Column({ default: false })
+  is_connected: boolean;
 
   @ManyToOne(() => User, (user) => user.devices)
   @JoinColumn({ name: 'user_id' })

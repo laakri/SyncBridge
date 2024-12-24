@@ -31,7 +31,7 @@ export function Navbar() {
       animate={{ y: 0, opacity: 1 }}
       className="h-6rem w-full z-50 px-6 py-4 relative"
     >
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto container px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 justify-between items-center">
           {/* Logo */}
           <div className="flex">

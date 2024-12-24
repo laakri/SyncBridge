@@ -2,10 +2,16 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { MailerService } from '@nestjs-modules/mailer';
 import { User } from '../../entities/user.entity';
 import { Device } from '../../entities/device.entity';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 
 @Injectable()
 export class EmailService {
-  constructor(private mailerService: MailerService) {}
+  constructor(
+    private mailerService: MailerService,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
+  ) {}
 
   private async sendEmail(
     to: string,
@@ -62,6 +68,27 @@ export class EmailService {
         deviceType: device.device_type,
         ipAddress: device.last_ip_address,
         loginTime: new Date().toLocaleString(),
+      },
+    );
+  }
+
+  async sendDeviceRemovedEmail(
+    userId: string,
+    deviceName: string,
+  ): Promise<void> {
+    const user = await this.userRepository.findOne({
+      where: { user_id: userId },
+    });
+    if (!user) return;
+
+    await this.sendEmail(
+      user.email,
+      'Device Removed from Your Account',
+      'device-removed',
+      {
+        name: user.full_name || user.username,
+        deviceName: deviceName,
+        removedAt: new Date().toLocaleString(),
       },
     );
   }

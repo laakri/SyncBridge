@@ -76,8 +76,17 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (deviceId) {
         console.log(`Device ${deviceId} disconnected`);
         this.connectedDevices.delete(deviceId);
+
+        // Instead of just emitting offline status, update the device in database
+        this.authService.updateDeviceStatus(deviceId, false);
+
         const rooms = Array.from(client.rooms);
-        client.broadcast.to(rooms).emit('device:offline', { deviceId });
+        // Emit the updated status instead of just "offline"
+        client.broadcast.to(rooms).emit('device:status', {
+          deviceId,
+          status: 'offline',
+          lastActive: new Date().toISOString(),
+        });
       }
     } catch (error) {
       console.error('Disconnect error:', error);

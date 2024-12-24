@@ -1,19 +1,48 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
-import { DevicesService } from './devices.service';
+import {
+  Controller,
+  Get,
+  Put,
+  Delete,
+  Param,
+  Body,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { User } from '../../entities/user.entity';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { GetUser } from '../auth/decorators/get-user.decorator';
+import { DevicesService } from './devices.service';
 
-@ApiTags('devices')
-@ApiBearerAuth()
 @Controller('devices')
 @UseGuards(JwtAuthGuard)
 export class DevicesController {
-  constructor(private readonly devicesService: DevicesService) {}
+  constructor(private devicesService: DevicesService) {}
 
   @Get()
-  async getUserDevices(@GetUser() user: User) {
-    return this.devicesService.findUserDevices(user.user_id);
+  async getUserDevices(@Request() req) {
+    return this.devicesService.findUserDevices(req.user.sub);
+  }
+
+  @Put(':deviceId/settings')
+  async updateDeviceSettings(
+    @Request() req,
+    @Param('deviceId') deviceId: string,
+    @Body()
+    settings: {
+      device_name?: string;
+      sync_enabled?: boolean;
+      auto_sync?: boolean;
+      sync_interval?: number;
+    },
+  ) {
+    return this.devicesService.updateDeviceSettings(
+      req.user.sub,
+      deviceId,
+      settings,
+    );
+  }
+
+  @Delete(':deviceId')
+  async deleteDevice(@Request() req, @Param('deviceId') deviceId: string) {
+    await this.devicesService.deleteDevice(req.user.sub, deviceId);
+    return { message: 'Device deleted successfully' };
   }
 }

@@ -84,6 +84,6 @@ import { RedisModule } from '../redis/redis.module';
       useValue: Repository,
     },
   ],
-  exports: [AuthService],
+  exports: [AuthService, EmailService],
 })
 export class AuthModule {}

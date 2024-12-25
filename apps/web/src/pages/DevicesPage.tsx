@@ -1,5 +1,9 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { Laptop, Plus, Smartphone, Monitor, QrCode, Settings, Trash2, Power, RefreshCw } from "lucide-react";
+import { 
+  Laptop, Plus, Smartphone, Monitor, QrCode, Settings, 
+  Trash2, Power, RefreshCw, Shield, Signal, Globe, 
+  CheckCircle2, Clock, 
+} from "lucide-react";
 import { useState, useEffect } from "react";
 import { QRLogin } from "../components/QRLogin";
 import { socketService } from "../services/socketService";
@@ -155,191 +159,214 @@ export function DevicesPage() {
   };
 
   return (
-    <div className="container mx-auto p-6 max-w-7xl">
+    <div className="container mx-auto p-6 max-w-3xl">
       <motion.div
-        initial={{ opacity: 0, y: 20 }}
+        initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="space-y-6"
+        className="space-y-8"
       >
-        {/* Header with Stats */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Your Devices</h1>
-            <p className="text-muted-foreground mt-1">
-              Manage and sync your connected devices
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => fetchDevices()}
-              className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-primary/5 text-muted-foreground"
-            >
-              <RefreshCw className="w-4 h-4" />
-              Refresh
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={() => setShowQR(true)}
-              className="flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-lg hover:bg-primary/90 transition-colors"
-            >
-              <Plus className="w-4 h-4" />
-              Add Device
-            </motion.button>
-          </div>
+        {/* Header */}
+        <div className="flex flex-col gap-2">
+          <h1 className="text-2xl font-medium tracking-tight text-white/90">Your Devices</h1>
+          <p className="text-sm text-white/50">
+            Manage and sync your connected devices
+          </p>
         </div>
 
-        {/* Devices Grid */}
-        <AnimatePresence mode="popLayout">
+        {/* Quick Stats */}
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { icon: Shield, label: "Protected", value: devices.length },
+            { icon: Signal, label: "Active", value: devices.filter(d => d.is_active).length },
+            { icon: Globe, label: "Network", value: "Online" }
+          ].map(({ icon: Icon, label, value }) => (
+            <motion.div
+              key={label}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] rounded-xl p-3"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-white/[0.03] border border-white/[0.08]">
+                  <Icon className="w-4 h-4 text-white/60" />
+                </div>
+                <div>
+                  <p className="text-xs text-white/40">{label}</p>
+                  <p className="text-sm font-medium text-white/80">{value}</p>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+
+        {/* Devices List */}
+        <div className="space-y-3">
           {isLoading ? (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
               className="flex items-center justify-center py-12"
             >
-              <div className="flex flex-col items-center gap-4">
-                <RefreshCw className="w-8 h-8 animate-spin text-primary" />
-                <p className="text-muted-foreground">Loading your devices...</p>
-              </div>
+              <RefreshCw className="w-5 h-5 animate-spin text-white/40" />
             </motion.div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <>
               {devices.map((device) => (
                 <motion.div
                   key={device.device_id}
                   layout
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  whileHover={{ scale: 1.02 }}
-                  transition={{ duration: 0.2 }}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className={cn(
+                    "group relative rounded-2xl border bg-white/[0.02] backdrop-blur-xl p-5 transition-all duration-300",
+                    device.is_current 
+                      ? "ring-1 ring-primary/20 shadow-[0_0_30px_-10px] shadow-primary/10" 
+                      : "hover:bg-white/[0.04]",
+                    selectedDevice === device.device_id && "ring-1 ring-primary/20"
+                  )}
+                  onClick={() => setSelectedDevice(device.device_id)}
                 >
-                  <div
-                    className={cn(
-                      "relative group rounded-xl border bg-card p-6 transition-all hover:shadow-lg",
-                      device.is_current && "ring-2 ring-primary",
-                      selectedDevice === device.device_id && "ring-2 ring-primary"
-                    )}
-                    onClick={() => setSelectedDevice(device.device_id)}
-                  >
+                  <div className="space-y-4">
                     {/* Device Header */}
-                    <div className="flex items-start justify-between mb-6">
-                      <div className="flex items-center gap-4">
-                        <div className={cn(
-                          "p-3 rounded-lg transition-colors",
-                          device.is_active ? "bg-primary/10" : "bg-muted"
-                        )}>
-                          {getDeviceIcon(device.device_type)}
-                        </div>
-                        <div>
-                          <h3 className="font-semibold text-lg line-clamp-1">
+                    <div className="flex items-center gap-4">
+                      <div className={cn(
+                        "p-2.5 rounded-xl transition-colors duration-300",
+                        device.is_active 
+                          ? "bg-primary/5 border border-primary/10" 
+                          : "bg-white/[0.03] border border-white/[0.08]"
+                      )}>
+                        {getDeviceIcon(device.device_type)}
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-medium text-white/90 truncate">
                             {device.device_name.split(' - ')[0]}
                           </h3>
-                          <p className="text-sm text-muted-foreground">
+                          {device.is_current && (
+                            <span className="text-xs text-primary/80 font-medium px-2 py-0.5 rounded-full bg-primary/10 border border-primary/20">
+                              Current Device
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 mt-1">
+                          <p className="text-xs text-white/40">
                             {device.os_type.charAt(0).toUpperCase() + device.os_type.slice(1)} • {device.browser_type}
                           </p>
+                          <span className="text-white/20">•</span>
+                          <div className="flex items-center gap-1.5">
+                            <div className={cn(
+                              "w-1.5 h-1.5 rounded-full",
+                              device.is_active ? "bg-emerald-400" : "bg-white/20"
+                            )} />
+                            <span className="text-xs text-white/40">
+                              {device.is_active ? 'Online' : 'Offline'}
+                            </span>
+                          </div>
                         </div>
                       </div>
-                      
-                      {/* Status Badge */}
-                      <div className={cn(
-                        "flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium",
-                        device.is_active 
-                          ? "bg-green-500/10 text-green-500"
-                          : "bg-gray-500/10 text-gray-500"
-                      )}>
-                        <div className={cn(
-                          "w-2 h-2 rounded-full",
-                          device.is_active ? "bg-green-500" : "bg-gray-500"
-                        )} />
-                        {device.is_active ? 'Online' : 'Offline'}
-                      </div>
-                    </div>
 
-                    {/* Device Info */}
-                    <div className="grid  gap-4 mb-6">
-                      <div>
-                        <p className="text-sm text-muted-foreground mb-1">Last Active</p>
-                        <p className="font-medium">
-                          {new Date(device.last_active).toLocaleString()}
-                        </p>
-                      </div>
-                      
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center justify-between pt-4 border-t">
-                      {device.is_current ? (
-                        <span className="text-sm text-primary font-medium">Current Device</span>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">
-                          Added {new Date(device.created_at).toLocaleDateString()}
-                        </span>
-                      )}
-                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
+                      {/* Quick Actions */}
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                        <motion.button
+                          whileHover={{ scale: 1.05 }}
+                          whileTap={{ scale: 0.95 }}
                           onClick={(e) => {
                             e.stopPropagation();
                             setSettingsDevice(device);
                           }}
-                          className="p-2 hover:bg-primary/10 rounded-lg transition-colors"
+                          className="p-2 hover:bg-white/[0.06] rounded-lg transition-colors"
                         >
-                          <Settings className="w-4 h-4 text-muted-foreground" />
-                        </button>
+                          <Settings className="w-4 h-4 text-white/60" />
+                        </motion.button>
                         {!device.is_current && (
-                          <button
+                          <motion.button
+                            whileHover={{ scale: 1.05 }}
+                            whileTap={{ scale: 0.95 }}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleDeleteDevice(device.device_id);
                             }}
-                            className="p-2 hover:bg-destructive/10 text-destructive rounded-lg transition-colors"
+                            className="p-2 hover:bg-white/[0.06] rounded-lg transition-colors"
                           >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                            <Trash2 className="w-4 h-4 text-white/40" />
+                          </motion.button>
                         )}
+                      </div>
+                    </div>
+
+                    {/* Device Details */}
+                    <div className="grid grid-cols-2 gap-4 pt-4 border-t border-white/[0.04]">
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-3.5 h-3.5 text-white/30" />
+                          <div>
+                            <p className="text-xs text-white/40">Last Active</p>
+                            <p className="text-xs font-medium text-white/60">
+                              {new Date(device.last_active).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Globe className="w-3.5 h-3.5 text-white/30" />
+                          <div>
+                            <p className="text-xs text-white/40">IP Address</p>
+                            <p className="text-xs font-medium text-white/60">
+                              {device.last_ip_address}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2">
+                          <Signal className="w-3.5 h-3.5 text-white/30" />
+                          <div>
+                            <p className="text-xs text-white/40">Sync Status</p>
+                            <p className="text-xs font-medium text-white/60">
+                              {device.sync_enabled ? 'Auto-sync enabled' : 'Manual sync'}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Shield className="w-3.5 h-3.5 text-white/30" />
+                          <div>
+                            <p className="text-xs text-white/40">Added On</p>
+                            <p className="text-xs font-medium text-white/60">
+                              {new Date(device.created_at).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </motion.div>
               ))}
 
-              {/* Add Device Card */}
-              <motion.div
+              {/* Add Device Button - Softer Style */}
+              <motion.button
                 layout
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                whileHover={{ scale: 1.02 }}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                whileHover={{ scale: 1.01 }}
+                onClick={() => setShowQR(true)}
+                className="w-full p-5 rounded-2xl border border-dashed border-white/[0.08] flex items-center justify-center gap-2 hover:border-primary/20 hover:bg-primary/[0.02] transition-all duration-300"
               >
-                <button
-                  onClick={() => setShowQR(true)}
-                  className="h-full min-h-[250px] w-full rounded-xl border border-dashed border-muted-foreground/20 p-6 flex flex-col items-center justify-center gap-4 hover:border-primary/50 hover:bg-primary/5 transition-all"
-                >
-                  <div className="p-3 rounded-lg bg-primary/10">
-                    <QrCode className="w-6 h-6 text-primary" />
-                  </div>
-                  <div className="text-center">
-                    <h3 className="font-semibold mb-1">Add New Device</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Scan QR code to connect another device
-                    </p>
-                  </div>
-                </button>
-              </motion.div>
-            </div>
+                <Plus className="w-4 h-4 text-primary/60" />
+                <span className="text-sm text-white/60">Add New Device</span>
+              </motion.button>
+            </>
           )}
-        </AnimatePresence>
+        </div>
 
-        {/* QR Modal */}
+        {/* Keep existing modals with updated styling */}
         <AnimatePresence>
           {showQR && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
               onClick={() => setShowQR(false)}
             >
               <motion.div
@@ -347,21 +374,14 @@ export function DevicesPage() {
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.95, opacity: 0 }}
                 onClick={(e) => e.stopPropagation()}
-                className="bg-card relative rounded-xl shadow-lg border max-w-md w-full p-6"
+                className="bg-white/[0.03] backdrop-blur-2xl relative rounded-xl shadow-lg border border-white/[0.08] max-w-md w-full p-6"
               >
-                <button
-                  onClick={() => setShowQR(false)}
-                  className="absolute right-4 top-4 p-2 hover:bg-primary/10 rounded-lg transition-colors"
-                >
-                  <Power className="w-4 h-4 text-muted-foreground" />
-                </button>
                 <QRLogin />
               </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Settings Modal */}
         <DeviceSettingsModal
           device={settingsDevice!}
           isOpen={!!settingsDevice}

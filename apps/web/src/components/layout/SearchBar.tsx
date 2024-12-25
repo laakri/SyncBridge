@@ -19,8 +19,11 @@ interface SearchResult {
   deviceType?: "laptop" | "phone" | "tablet";
 }
 
-export function SearchBar() {
-  const [isOpen, setIsOpen] = useState(false);
+interface SearchBarProps {
+  onClose: () => void;
+}
+
+export function SearchBar({ onClose }: SearchBarProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
 
@@ -46,16 +49,15 @@ export function SearchBar() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        setIsOpen(true);
-      }
-      if (e.key === "Escape") {
-        setIsOpen(false);
+        onClose();
+      } else if (e.key === "Escape") {
+        onClose();
       }
     };
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
   const handleSearch = (value: string) => {
     setQuery(value);
@@ -71,7 +73,7 @@ export function SearchBar() {
       {/* Search Trigger - Responsive width */}
       <div className="relative w-full max-w-[180px] sm:max-w-[240px] md:max-w-[280px] lg:max-w-[320px]">
         <button
-          onClick={() => setIsOpen(true)}
+          onClick={() => onClose()}
           className="w-full flex items-center gap-2 px-3 py-1.5 bg-background-secondary rounded-lg border border-border transition-all group"
         >
           <Search className="h-3.5 w-3.5 text-gray-400 group-hover:text-gray-300 transition-colors" />
@@ -86,12 +88,12 @@ export function SearchBar() {
       </div>
 
       <AnimatePresence>
-        {isOpen && (
+        {onClose && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={() => setIsOpen(false)}
+            onClick={() => onClose()}
             className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 px-4 md:px-0"
           >
             <div className="fixed inset-x-0 top-[10%] sm:top-[15%] md:top-[20%] max-w-[90%] sm:max-w-lg md:max-w-xl mx-auto">

@@ -9,6 +9,7 @@ import { LandingPage } from "../components/landing/LandingPage";
 import { AuthPage } from "../pages/AuthPage";
 import { VerifyEmailPage } from "../pages/VerifyEmailPage";
 import { DevicesPage } from "../pages/DevicesPage";
+import { SyncDashboard } from "../components/sync/SyncDashboard";
 
 // Root layout route - This is your base layout that wraps all pages
 const rootRoute = createRootRoute({
@@ -33,16 +34,12 @@ export const devicesRoute = createRoute({
   path: "/devices",
   component: DevicesPage,
 });
-// Dashboard route with auth protection
-// const dashboardRoute = createRoute({
-//   getParentRoute: () => rootRoute,
-//   path: "/dashboard",
-//   component: () => (
-//     <ProtectedRoute>
-//       <Dashboard />
-//     </ProtectedRoute>
-//   ),
-// });
+export const syncRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/sync",
+  component: SyncDashboard,
+});
+
 
 // Export the route
 export const verifyEmailRoute = new Route({
@@ -61,6 +58,7 @@ export const routeTree = rootRoute.addChildren([
   indexRoute,
   authRoute,
   devicesRoute,
+  syncRoute,
   verifyEmailRoute,
 ]);
 

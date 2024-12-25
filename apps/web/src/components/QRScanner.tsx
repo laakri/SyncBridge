@@ -7,7 +7,11 @@ import { Loader2 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { DecodeHintType, BarcodeFormat } from "@zxing/library";
 
-export function QRScanner() {
+interface QRScannerProps {
+  onClose: () => void;
+}
+
+export function QRScanner({ onClose }: QRScannerProps) {
   const [scanning, setScanning] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<string>("");
   const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
@@ -207,6 +211,8 @@ export function QRScanner() {
       <div className="text-sm text-muted-foreground">
         Status: {scanning ? "Scanning..." : "Initializing..."}
       </div>
+
+      <button onClick={onClose}>Close</button>
     </div>
   );
 }

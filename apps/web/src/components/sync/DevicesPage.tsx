@@ -4,13 +4,13 @@ import {
   Trash2, RefreshCw, Shield, Signal, Globe, Clock, 
 } from "lucide-react";
 import { useState, useEffect } from "react";
-import { QRLogin } from "../components/QRLogin";
-import { socketService } from "../services/socketService";
 import { toast } from "react-hot-toast";
-import { api } from "../lib/api";
-import { cn } from "../lib/utils";
-import { DeviceSettingsModal } from "../components/DeviceSettingsModal";
-import { Device } from "../types/device";
+import { cn } from "../../lib/utils";
+import { DeviceSettingsModal } from "../../components/DeviceSettingsModal";
+import { Device } from "../../types/device";
+import { api } from "../../lib/api";
+import { socketService } from "../../services/socketService";
+import { QRLogin } from "../QRLogin";
 
 
 

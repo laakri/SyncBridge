@@ -346,8 +346,8 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const userId = client.user.sub;
       await this.syncService.deleteSync(payload.syncId, userId);
 
-      // Get updated lists after deletion
-      const [recentSyncs, favoriteSyncs] = await Promise.all([
+      // Get updated lists and stats after deletion
+      const [recentSyncs, favoriteSyncs, updatedStats] = await Promise.all([
         this.syncService.getRecentSyncs(
           userId,
           client.user.deviceId,
@@ -356,6 +356,7 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
           10,
         ),
         this.syncService.getFavoriteSyncs(userId, 5),
+        this.syncService.getDeviceStats(userId), // Get updated stats
       ]);
 
       // Transform and emit updated data
@@ -376,6 +377,7 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.server.to(`user:${userId}`).emit('sync:batch', {
         recent: recentSyncs.map(transformSync),
         favorites: favoriteSyncs.map(transformSync),
+        stats: updatedStats, // Include updated stats in the batch
       });
     } catch (error) {
       console.error('Delete sync error:', error);

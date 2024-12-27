@@ -4,8 +4,8 @@ import {
   Zap, Shield, Globe, Clipboard
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
-import { FlipWords } from "./FlipWords";
-import { Footer } from "./Footer";
+import { FlipWords } from "../layout/FlipWords";
+import { Footer } from "../layout/Footer";
 
 export function LandingPage() {
   const navigate = useNavigate();

@@ -6,10 +6,10 @@ import {
 } from "@tanstack/react-router";
 import { Layout } from "../components/layout/Layout";
 import { LandingPage } from "../components/landing/LandingPage";
-import { AuthPage } from "../pages/AuthPage";
-import { VerifyEmailPage } from "../pages/VerifyEmailPage";
-import { DevicesPage } from "../pages/DevicesPage";
+import { AuthPage } from "../components/auth/AuthPage";
+import { VerifyEmailPage } from "../components/auth/VerifyEmailPage";
 import { SyncDashboard } from "../components/sync/SyncDashboard";
+import { DevicesPage } from "../components/sync/DevicesPage";
 
 // Root layout route - This is your base layout that wraps all pages
 const rootRoute = createRootRoute({

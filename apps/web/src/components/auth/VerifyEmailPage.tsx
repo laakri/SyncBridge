@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { authService } from "../services/authService";
+import { authService } from "../../services/authService";
 import { motion } from "framer-motion";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
-import { verifyEmailRoute } from "../routes";
+import { verifyEmailRoute } from "../../routes";
 
 export function VerifyEmailPage() {
   const [status, setStatus] = useState<"loading" | "success" | "error">(

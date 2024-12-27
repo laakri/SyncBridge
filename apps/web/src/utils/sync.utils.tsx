@@ -4,7 +4,7 @@ export const getIconForType = (type: string) => {
   switch (type.toLowerCase()) {
     case 'clipboard':
       return <Clipboard className="w-4 h-4 text-primary/90" />;
-    case 'reading':
+    case 'link':
       return <Book className="w-4 h-4 text-emerald-400/80" />;
     case 'file':
       return <File className="w-4 h-4 text-violet-400/80" />;

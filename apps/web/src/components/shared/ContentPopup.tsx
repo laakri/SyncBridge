@@ -2,6 +2,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Copy, ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { syncToast } from "../../utils/toast.utils";
+import { cn } from "../../lib/utils";
 
 interface ContentPopupProps {
   isOpen: boolean;
@@ -11,6 +12,11 @@ interface ContentPopupProps {
   type?: 'note' | 'clipboard' | 'link' | 'file';
   metadata?: Record<string, any>;
   timestamp?: Date;
+  actions?: Array<{
+    label: string;
+    onClick: () => void;
+    variant: 'danger' | 'secondary' | 'primary';
+  }>;
 }
 
 export function ContentPopup({
@@ -20,7 +26,8 @@ export function ContentPopup({
   title,
   type = 'note',
   metadata,
-  timestamp
+  timestamp,
+  actions
 }: ContentPopupProps) {
   const [copied, setCopied] = useState(false);
 
@@ -45,7 +52,7 @@ export function ContentPopup({
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden"
+            className="bg-background border border-white/[0.08] rounded-2xl shadow-2xl max-w-2xl w-full"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -60,49 +67,20 @@ export function ContentPopup({
                   </p>
                 )}
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleCopy}
-                  className="p-2 hover:bg-white/[0.06] rounded-lg transition-colors"
-                >
-                  <Copy className={`w-4 h-4 ${copied ? 'text-green-400' : 'text-white/40'}`} />
-                </button>
-                {type === 'link' && (
-                  <a
-                    href={content}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-2 hover:bg-white/[0.06] rounded-lg transition-colors"
-                  >
-                    <ExternalLink className="w-4 h-4 text-white/40" />
-                  </a>
-                )}
-                <button
-                  onClick={onClose}
-                  className="p-2 hover:bg-white/[0.06] rounded-lg transition-colors"
-                >
-                  <X className="w-4 h-4 text-white/40" />
-                </button>
-              </div>
+              <button
+                onClick={onClose}
+                className="p-2 hover:bg-white/[0.06] rounded-lg transition-colors"
+              >
+                <X className="w-4 h-4 text-white/40" />
+              </button>
             </div>
 
             {/* Content */}
-            <div className="p-6 overflow-y-auto max-h-[60vh]">
+            <div className="p-6">
               <div className="prose prose-invert max-w-none">
-                {type === 'link' ? (
-                  <a
-                    href={content}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-primary hover:text-primary/80 break-all"
-                  >
-                    {content}
-                  </a>
-                ) : (
-                  <pre className="whitespace-pre-wrap break-words font-sans text-white/90">
-                    {content}
-                  </pre>
-                )}
+                <pre className="whitespace-pre-wrap break-words font-sans text-white/90">
+                  {content}
+                </pre>
               </div>
 
               {/* Metadata */}
@@ -120,6 +98,26 @@ export function ContentPopup({
                 </div>
               )}
             </div>
+
+            {/* Action Buttons */}
+            {actions && actions.length > 0 && (
+              <div className="border-t border-white/[0.08] p-4 flex justify-end gap-3">
+                {actions.map((action, index) => (
+                  <button
+                    key={index}
+                    onClick={action.onClick}
+                    className={cn(
+                      "px-4 py-2 rounded-lg text-sm font-medium transition-colors",
+                      action.variant === 'danger' && "bg-red-500/10 hover:bg-red-500/20 text-red-400",
+                      action.variant === 'secondary' && "bg-white/5 hover:bg-white/10 text-white/70",
+                      action.variant === 'primary' && "bg-primary/10 hover:bg-primary/20 text-primary"
+                    )}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </motion.div>
         </motion.div>
       )}

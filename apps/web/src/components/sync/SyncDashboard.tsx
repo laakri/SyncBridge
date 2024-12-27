@@ -14,7 +14,6 @@ import { FileUpload } from './FileUpload';
 import { useNavigate } from "@tanstack/react-router";
 import { socketService } from "../../services/socketService";
 import { Socket } from "socket.io-client";
-import {  formatTimeAgo } from "../../utils/sync.utils";
 import { syncToast } from "../../utils/toast.utils";
 import { validateSync } from "../../utils/validation.utils";
 import { ContentType, SyncItem } from "../../types/sync";
@@ -56,28 +55,60 @@ export function SyncDashboard() {
         // Listen for batch sync data
         socketInstance.on('sync:batch', (data) => {
           console.log('[Dashboard] Received sync batch:', data);
-          if (!Array.isArray(data)) return;
+          if (!data) return;
           
-          // Transform all syncs
-          const transformedSyncs = data.map(sync => ({
-            id: sync.sync_id,
-            type: sync.content_type as ContentType,
-            content: sync.content.value,
-            timestamp: new Date(sync.content.timestamp),
-            deviceFrom: sync.source_device_id,
-            metadata: sync.metadata,
-            isFavorite: sync.is_favorite || false
-          }));
-          
-          // Split into recent and favorites
-          const favorites = transformedSyncs.filter(sync => sync.isFavorite);
-          const recents = transformedSyncs.filter(sync => !sync.isFavorite);
-          
-          // Update states
-          setRecentSyncs(recents.slice(0, 10));
-          setFavorites(favorites.slice(0, 5));
-          
-          console.log('[Dashboard] Processed syncs:', { recents, favorites });
+          // Update stats if provided
+          if (data.stats) {
+            setStats(data.stats);
+          }
+
+          // Transform recent syncs
+          if (data.recent) {
+            const transformedRecents = data.recent.map((sync: { 
+              sync_id: string;
+              content_type: string;
+              content: {
+                value: string;
+                timestamp: string;
+              };
+              source_device_id: string;
+              metadata?: Record<string, any>;
+              is_favorite?: boolean;
+            }) => ({
+              id: sync.sync_id,
+              type: sync.content_type as ContentType,
+              content: sync.content.value,
+              timestamp: new Date(sync.content.timestamp),
+              deviceFrom: sync.source_device_id,
+              metadata: sync.metadata,
+              isFavorite: sync.is_favorite || false
+            }));
+            setRecentSyncs(transformedRecents);
+          }
+
+          // Transform favorites
+          if (data.favorites) {
+            const transformedFavorites = data.favorites.map((sync: { 
+              sync_id: string;
+              content_type: string;
+              content: {
+                value: string;
+                timestamp: string;
+              };
+              source_device_id: string;
+              metadata?: Record<string, any>;
+              is_favorite?: boolean;
+            }) => ({
+              id: sync.sync_id,
+              type: sync.content_type as ContentType,
+              content: sync.content.value,
+              timestamp: new Date(sync.content.timestamp),
+              deviceFrom: sync.source_device_id,
+              metadata: sync.metadata,
+              isFavorite: true
+            }));
+            setFavorites(transformedFavorites);
+          }
         });
 
         // Listen for new syncs
@@ -249,6 +280,8 @@ export function SyncDashboard() {
             sync={sync}
             onCopy={() => syncToast.success.created('clipboard')}
             onToggleFavorite={handleToggleFavorite}
+            onDelete={handleDeleteSync}
+            isFavorite={sync.isFavorite}
           />
         ))
       )}
@@ -294,6 +327,7 @@ export function SyncDashboard() {
                     sync={sync}
                     onCopy={() => syncToast.success.created('clipboard')}
                     onToggleFavorite={handleToggleFavorite}
+                    onDelete={handleDeleteSync}
                     isFavorite={true}
                   />
                 </motion.div>
@@ -306,18 +340,32 @@ export function SyncDashboard() {
   );
 
   const renderQuickStats = () => (
-    <motion.div layout className="grid grid-cols-3 gap-3 mb-6">
-      {[
-        { label: 'Clips', type: 'clipboard', icon: Clipboard },
-        { label: 'Files', type: 'file', icon: File },
-        { label: 'Notes', type: 'note', icon: StickyNote },
-      ].map(({ label, type, icon: Icon }) => (
-        <div key={type} className="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-xl p-4">
-          <Icon className="w-4 h-4 text-primary/80 mb-2" />
-          <p className="text-2xl font-semibold text-white/90">{stats[type] || 0}</p>
-          <p className="text-xs text-white/50">{label}</p>
-        </div>
-      ))}
+    <motion.div layout className="mb-6">
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: 'Clips', type: 'clipboard', icon: Clipboard, color: 'text-primary/80' },
+          { label: 'Files', type: 'file', icon: File, color: 'text-violet-400/80' },
+          { label: 'Notes', type: 'note', icon: StickyNote, color: 'text-amber-400/80' },
+        ].map(({ label, type, icon: Icon, color }) => (
+          <div 
+            key={type} 
+            className="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-xl p-4 flex items-center gap-3"
+          >
+            <div className={cn(
+              "p-2.5 rounded-xl transition-all duration-300",
+              "bg-white/[0.03] border border-white/[0.08]"
+            )}>
+              <Icon className={cn("w-5 h-5", color)} />
+            </div>
+            <div className="flex items-baseline gap-2">
+              <p className="text-2xl font-semibold text-white/90">
+                {stats[type] || 0}
+              </p>
+              <p className="text-xs font-medium text-white/50">{label}</p>
+            </div>
+          </div>
+        ))}
+      </div>
     </motion.div>
   );
 
@@ -325,28 +373,40 @@ export function SyncDashboard() {
     if (!socket) return;
     
     console.log('[Dashboard] Toggling favorite for sync:', syncId);
-    socket.emit('sync:toggle-favorite', { syncId });
     
     // Optimistic update
     const sync = recentSyncs.find(s => s.id === syncId);
     if (sync) {
       const isFavorite = !sync.isFavorite;
       
-      // Update recent syncs
+      // Update recent syncs optimistically
       setRecentSyncs(prev => 
         prev.map(s => s.id === syncId ? { ...s, isFavorite } : s)
       );
       
-      // Update favorites
+      // Update favorites optimistically
       if (isFavorite) {
         setFavorites(prev => [{ ...sync, isFavorite: true }, ...prev].slice(0, 5));
       } else {
         setFavorites(prev => prev.filter(s => s.id !== syncId));
       }
-      
-      // Request fresh data from server
-      socket.emit('sync:request', { limit: 10 });
     }
+    
+    // Send toggle request
+    socket.emit('sync:toggle-favorite', { syncId });
+  };
+
+  const handleDeleteSync = (syncId: string) => {
+    if (!socket) return;
+    
+    console.log('[Dashboard] Deleting sync:', syncId);
+    
+    // Optimistic update
+    setRecentSyncs(prev => prev.filter(s => s.id !== syncId));
+    setFavorites(prev => prev.filter(s => s.id !== syncId));
+    
+    // Send delete request
+    socket.emit('sync:delete', { syncId });
   };
 
   return (

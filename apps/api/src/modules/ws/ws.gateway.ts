@@ -99,10 +99,22 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const stats = await this.syncService.getDeviceStats(payload.sub);
       const devices = await this.authService.getUserDevices(payload.sub);
 
+      // Transform current device data to include all needed fields
+      const transformedDevice = {
+        device_id: device.device_id,
+        device_name: device.device_name,
+        device_type: device.device_type,
+        os_type: device.os_type,
+        browser_type: device.browser_type,
+        is_active: device.is_active,
+        last_active: device.last_active,
+        user_id: device.user_id,
+      };
+
       client.emit('init:data', {
         stats,
         devices,
-        currentDevice: device,
+        currentDevice: transformedDevice,
       });
     } catch (error) {
       client.disconnect();
@@ -133,42 +145,59 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @UseGuards(WsJwtGuard)
   @SubscribeMessage('sync:create')
-  async handleSyncCreate(client: AuthenticatedSocket, payload: SyncPayload) {
+  async handleSync(
+    client: AuthenticatedSocket,
+    payload: {
+      content: string;
+      content_type: ContentType;
+      metadata?: Record<string, any>;
+      parent_sync_id?: string;
+    },
+  ) {
     try {
       const userId = client.user.sub;
-      const deviceId = client.handshake.auth.deviceId;
+      const deviceId = client.user.deviceId;
 
-      const syncData = await this.syncService.createSync(userId, deviceId, {
-        content: payload.content,
-        content_type: payload.content_type,
-        metadata: payload.metadata,
-        parent_sync_id: payload.parent_sync_id,
+      // Create the new sync
+      const syncData = await this.syncService.createSync(
+        userId,
+        deviceId,
+        payload,
+      );
+
+      // Get updated lists and stats after creating new sync
+      const [recentSyncs, favoriteSyncs, updatedStats] = await Promise.all([
+        this.syncService.getRecentSyncs(
+          userId,
+          deviceId,
+          undefined,
+          undefined,
+          10,
+        ),
+        this.syncService.getFavoriteSyncs(userId, 5),
+        this.syncService.getDeviceStats(userId), // Get updated stats
+      ]);
+
+      // Transform sync data
+      const transformSync = (sync) => ({
+        sync_id: sync.sync_id,
+        content: {
+          value: sync.content.value,
+          timestamp: sync.content.timestamp,
+        },
+        content_type: sync.content_type,
+        source_device_id: sync.source_device_id,
+        metadata: sync.metadata,
+        created_at: sync.created_at,
+        is_favorite: sync.is_favorite || false,
       });
 
-      // If specific target devices are specified, emit only to them
-      if (payload.target_devices?.length) {
-        payload.target_devices.forEach((targetDeviceId) => {
-          const targetSocket = this.connectedDevices.get(targetDeviceId);
-          if (targetSocket) {
-            targetSocket.emit('sync:data', {
-              sync_id: syncData.sync_id,
-              content: syncData.content,
-              content_type: syncData.content_type,
-              source_device_id: deviceId,
-              metadata: syncData.metadata,
-            });
-          }
-        });
-      } else {
-        // Broadcast to all user's devices except sender
-        client.to(`user:${userId}`).emit('sync:data', {
-          sync_id: syncData.sync_id,
-          content: syncData.content,
-          content_type: syncData.content_type,
-          source_device_id: deviceId,
-          metadata: syncData.metadata,
-        });
-      }
+      // Emit to all user's devices including sender
+      this.server.to(`user:${userId}`).emit('sync:batch', {
+        recent: recentSyncs.map(transformSync),
+        favorites: favoriteSyncs.map(transformSync),
+        stats: updatedStats, // Include updated stats in the batch
+      });
 
       // Acknowledge successful sync to sender
       client.emit('sync:ack', {
@@ -177,10 +206,7 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       });
     } catch (error) {
       console.error('Sync creation error:', error);
-      client.emit('sync:error', {
-        message: 'Failed to create sync',
-        error: error.message,
-      });
+      client.emit('sync:error', { message: 'Failed to create sync' });
     }
   }
 
@@ -218,21 +244,20 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const userId = client.user.sub;
       const deviceId = client.user.deviceId;
 
-      console.log('Sync request received:', payload);
+      // Get both recent and favorite syncs
+      const [recentSyncs, favoriteSyncs] = await Promise.all([
+        this.syncService.getRecentSyncs(
+          userId,
+          deviceId,
+          payload.content_type,
+          payload.since,
+          payload.limit,
+        ),
+        this.syncService.getFavoriteSyncs(userId, 5),
+      ]);
 
-      // Get recent syncs for the device
-      const recentSyncs = await this.syncService.getRecentSyncs(
-        userId,
-        deviceId,
-        payload.content_type,
-        payload.since,
-        payload.limit,
-      );
-
-      console.log('Found syncs:', recentSyncs);
-
-      // Transform the data to match the expected format
-      const transformedSyncs = recentSyncs.map((sync) => ({
+      // Transform both sets of data
+      const transformSync = (sync) => ({
         sync_id: sync.sync_id,
         content: {
           value: sync.content.value,
@@ -242,7 +267,13 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         source_device_id: sync.source_device_id,
         metadata: sync.metadata,
         created_at: sync.created_at,
-      }));
+        is_favorite: sync.is_favorite || false,
+      });
+
+      const transformedSyncs = {
+        recent: recentSyncs.map(transformSync),
+        favorites: favoriteSyncs.map(transformSync),
+      };
 
       console.log('Sending transformed syncs:', transformedSyncs);
       client.emit('sync:batch', transformedSyncs);
@@ -268,19 +299,87 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         userId,
       );
 
-      // Broadcast the update to all user's devices
-      this.server.to(`user:${userId}`).emit('sync:favorite-updated', {
-        syncId: payload.syncId,
-        isFavorite,
+      // Get updated lists after toggle
+      const [recentSyncs, favoriteSyncs] = await Promise.all([
+        this.syncService.getRecentSyncs(
+          userId,
+          client.user.deviceId,
+          undefined,
+          undefined,
+          10,
+        ),
+        this.syncService.getFavoriteSyncs(userId, 5),
+      ]);
+
+      // Transform and emit updated data
+      const transformSync = (sync) => ({
+        sync_id: sync.sync_id,
+        content: {
+          value: sync.content.value,
+          timestamp: sync.content.timestamp,
+        },
+        content_type: sync.content_type,
+        source_device_id: sync.source_device_id,
+        metadata: sync.metadata,
+        created_at: sync.created_at,
+        is_favorite: sync.is_favorite || false,
       });
 
-      return { success: true, isFavorite };
+      // Emit to all user's connected devices
+      this.server.to(`user:${userId}`).emit('sync:batch', {
+        recent: recentSyncs.map(transformSync),
+        favorites: favoriteSyncs.map(transformSync),
+      });
     } catch (error) {
       console.error('Toggle favorite error:', error);
-      client.emit('sync:error', {
-        message: 'Failed to toggle favorite',
-        error: error.message,
+      client.emit('sync:error', { message: 'Failed to toggle favorite' });
+    }
+  }
+
+  @UseGuards(WsJwtGuard)
+  @SubscribeMessage('sync:delete')
+  async handleDeleteSync(
+    client: AuthenticatedSocket,
+    payload: { syncId: string },
+  ) {
+    try {
+      const userId = client.user.sub;
+      await this.syncService.deleteSync(payload.syncId, userId);
+
+      // Get updated lists after deletion
+      const [recentSyncs, favoriteSyncs] = await Promise.all([
+        this.syncService.getRecentSyncs(
+          userId,
+          client.user.deviceId,
+          undefined,
+          undefined,
+          10,
+        ),
+        this.syncService.getFavoriteSyncs(userId, 5),
+      ]);
+
+      // Transform and emit updated data
+      const transformSync = (sync) => ({
+        sync_id: sync.sync_id,
+        content: {
+          value: sync.content.value,
+          timestamp: sync.content.timestamp,
+        },
+        content_type: sync.content_type,
+        source_device_id: sync.source_device_id,
+        metadata: sync.metadata,
+        created_at: sync.created_at,
+        is_favorite: sync.is_favorite || false,
       });
+
+      // Emit to all user's connected devices
+      this.server.to(`user:${userId}`).emit('sync:batch', {
+        recent: recentSyncs.map(transformSync),
+        favorites: favoriteSyncs.map(transformSync),
+      });
+    } catch (error) {
+      console.error('Delete sync error:', error);
+      client.emit('sync:error', { message: 'Failed to delete sync' });
     }
   }
 

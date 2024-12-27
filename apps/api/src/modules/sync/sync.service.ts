@@ -219,4 +219,26 @@ export class SyncService {
 
     return sync.is_favorite;
   }
+
+  async deleteSync(syncId: string, userId: string): Promise<boolean> {
+    console.log('[SyncService] Deleting sync:', syncId);
+
+    const sync = await this.syncDataRepository.findOne({
+      where: {
+        sync_id: syncId,
+        user_id: userId,
+        is_deleted: false,
+      },
+    });
+
+    if (!sync) {
+      throw new Error('Sync not found');
+    }
+
+    sync.is_deleted = true;
+    await this.syncDataRepository.save(sync);
+
+    console.log('[SyncService] Sync marked as deleted:', syncId);
+    return true;
+  }
 }

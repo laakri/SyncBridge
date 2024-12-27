@@ -3,7 +3,6 @@ import axios from 'axios';
 
 class SocketService {
   private socket: Socket | null = null;
-  private isRefreshing = false;
   private reconnectAttempts = 0;
   private readonly MAX_RECONNECT_ATTEMPTS = 3;
 

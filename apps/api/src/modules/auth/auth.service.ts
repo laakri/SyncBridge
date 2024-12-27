@@ -587,11 +587,30 @@ export class AuthService {
     };
   }
 
-  async findDeviceById(deviceId: string): Promise<Device | null> {
-    return this.deviceRepository.findOne({
-      where: { device_id: deviceId },
-      select: ['device_id', 'user_id', 'device_name', 'is_active'],
+  async findDeviceById(deviceId: string) {
+    const device = await this.deviceRepository.findOne({
+      where: {
+        device_id: deviceId,
+      },
+      select: [
+        'device_id',
+        'device_name',
+        'device_type',
+        'os_type',
+        'browser_type',
+        'is_active',
+        'last_active',
+        'user_id',
+        'created_at',
+        'updated_at',
+      ],
     });
+
+    if (!device) {
+      throw new NotFoundException('Device not found');
+    }
+
+    return device;
   }
 
   async updateDeviceStatus(
@@ -607,11 +626,24 @@ export class AuthService {
     );
   }
 
-  async getUserDevices(userId: string): Promise<Device[]> {
-    return this.deviceRepository.find({
-      where: { user_id: userId },
+  async getUserDevices(userId: string) {
+    return await this.deviceRepository.find({
+      where: {
+        user_id: userId,
+      },
+      select: [
+        'device_id',
+        'device_name',
+        'device_type',
+        'os_type',
+        'browser_type',
+        'is_active',
+        'last_active',
+        'user_id',
+        'created_at',
+        'updated_at',
+      ],
       order: {
-        is_connected: 'DESC',
         last_active: 'DESC',
       },
     });

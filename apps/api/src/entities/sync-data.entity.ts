@@ -13,12 +13,10 @@ import { Device } from './device.entity';
 import { SyncStatus } from './sync-status.entity';
 
 export enum ContentType {
-  TEXT = 'text',
+  CLIPBOARD = 'clipboard',
+  READING = 'reading',
   FILE = 'file',
-  IMAGE = 'image',
-  URL = 'url',
   NOTE = 'note',
-  TASK = 'task',
 }
 
 @Entity('sync_data')
@@ -29,6 +27,7 @@ export class SyncData {
   @Column({
     type: 'enum',
     enum: ContentType,
+    name: 'content_type',
   })
   content_type: ContentType;
 

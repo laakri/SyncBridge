@@ -1,94 +1,203 @@
 import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
 import { 
-  Clipboard, Book, File, StickyNote,  Clock, 
-   Star, Smartphone, Laptop,
-  Command, Zap, Share2, X, ArrowRight, Bookmark
+  Clipboard, Book, File, StickyNote, Clock, 
+  Star, Smartphone, 
+  Command, Zap, X, ArrowRight, Bookmark,
+  InboxIcon
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "../../lib/utils";
 import { contentDetectorService } from "../../services/contentDetectorService";
 import { FileUpload } from './FileUpload';
 import { useNavigate } from "@tanstack/react-router";
-
-interface DetectedContent {
-  type: 'clipboard' | 'reading' | 'file' | 'note';
-  confidence: number;
-  metadata?: {
-    title?: string;
-    size?: number;
-    format?: string;
-    preview?: string;
-    url?: string;
-    path?: string;
-    wordCount?: number;
-    readingTime?: number;
-  };
-}
-
-interface SyncItem {
-  id: string;
-  type: 'clipboard' | 'reading' | 'file' | 'note';
-  content: string;
-  timestamp: Date;
-  deviceFrom?: string;
-  deviceTo?: string;
-}
+import { socketService } from "../../services/socketService";
+import { Socket } from "socket.io-client";
+import { getIconForType, formatTimeAgo } from "../../utils/sync.utils";
+import { syncToast } from "../../utils/toast.utils";
+import { validateSync } from "../../utils/validation.utils";
+import { ContentType, SyncItem } from "../../types/sync";
 
 export function SyncDashboard() {
-  const [activeTab, setActiveTab] = useState<SyncItem['type']>('clipboard');
+  const [activeTab, setActiveTab] = useState<ContentType>('clipboard');
   const [searchQuery, setSearchQuery] = useState('');
   const [isDetecting, setIsDetecting] = useState(false);
-  const [detectedContent, setDetectedContent] = useState<DetectedContent | null>(null);
   const [showFileUpload, setShowFileUpload] = useState(false);
   const navigate = useNavigate();
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [recentSyncs, setRecentSyncs] = useState<SyncItem[]>([]);
+  const [notes, setNotes] = useState<SyncItem[]>([]);
+
+  useEffect(() => {
+    const initializeSocket = async () => {
+      try {
+        const socketInstance = await socketService.connect();
+        setSocket(socketInstance);
+        syncToast.connection.connected();
+
+        // Listen for new syncs
+        socketInstance.on('sync:data', (data) => {
+          console.log('Received sync data:', data);
+          const newSync = {
+            id: data.sync_id,
+            type: data.content_type,
+            content: data.content.value,
+            timestamp: new Date(data.content.timestamp),
+            deviceFrom: data.source_device_id,
+            metadata: data.metadata
+          };
+
+          // Update recent syncs
+          setRecentSyncs(prev => {
+            const updated = [newSync, ...prev].slice(0, 10);
+            console.log('Updated recent syncs:', updated);
+            return updated;
+          });
+
+          // Update notes if applicable
+          if (data.content_type === 'note') {
+            setNotes(prev => {
+              const updated = [newSync, ...prev].slice(0, 5);
+              console.log('Updated notes:', updated);
+              return updated;
+            });
+          }
+
+          syncToast.success.received(data.content_type);
+        });
+
+        // Request recent syncs
+        socketInstance.emit('sync:request', { limit: 10 });
+        console.log('Requested recent syncs');
+
+      } catch (error) {
+        console.error('Socket connection error:', error);
+        syncToast.error.connection();
+      }
+    };
+
+    initializeSocket();
+
+    return () => {
+      if (socket) {
+        socket.off('sync:data');
+        socket.disconnect();
+      }
+    };
+  }, []);
+
+  const handleSync = () => {
+    if (!searchQuery.trim() || !socket) return;
+
+    const validation = validateSync(activeTab, searchQuery);
+    if (!validation.isValid) {
+      syncToast.error.validation(validation.error!);
+      return;
+    }
+
+    console.log('Emitting sync:', {
+      content: searchQuery,
+      content_type: activeTab,
+      metadata: contentDetectorService.detect(searchQuery).metadata
+    });
+
+    socket.emit('sync:create', {
+      content: searchQuery,
+      content_type: activeTab,
+      metadata: contentDetectorService.detect(searchQuery).metadata,
+    });
+
+    syncToast.success.created(activeTab);
+    setSearchQuery('');
+  };
+
+  const handleFileSelect = async (file: File) => {
+    if (!socket) return;
+
+    const validation = validateSync('file', file);
+    if (!validation.isValid) {
+      syncToast.error.validation(validation.error!);
+      return;
+    }
+
+    // Convert file to base64 or handle it according to your backend requirements
+    const reader = new FileReader();
+    reader.onload = () => {
+      socket.emit('sync:create', {
+        content: reader.result as string,
+        content_type: 'file',
+        metadata: {
+          filename: file.name,
+          size: file.size,
+          type: file.type
+        }
+      });
+      syncToast.success.created('file');
+    };
+    reader.readAsDataURL(file);
+    setShowFileUpload(false);
+  };
 
   const handleInputChange = (value: string) => {
     setSearchQuery(value);
     setIsDetecting(true);
-    
-    // Detect content type
-    const detected = contentDetectorService.detect(value);
-    console.log('Detected content:', detected);
-    setDetectedContent(detected);
-    
-    // Auto-switch to detected type if confidence is high
-    if (detected.confidence > 0.8) {
-      setActiveTab(detected.type);
-    }
-    
-    setTimeout(() => setIsDetecting(false), 800);
+
+    // Debounce the detection
+    const timer = setTimeout(() => {
+      setIsDetecting(false);
+    }, 500);
+
+    return () => clearTimeout(timer);
   };
 
-  const handleSync = () => {
-    if (!searchQuery.trim()) return;
+  const renderEmptyState = () => (
+    <div className="flex flex-col items-center justify-center py-8 text-white/50">
+      <InboxIcon className="w-12 h-12 mb-4 text-white/20" />
+      <p className="text-sm">No recent syncs</p>
+      <p className="text-xs mt-1">Start syncing content across your devices</p>
+    </div>
+  );
 
-    // Validate content based on active type
-    if (!contentDetectorService.validateContent(activeTab, searchQuery)) {
-      console.error('Invalid content for type:', activeTab);
-      return;
-    }
-
-    // Log the sync action (to be replaced with actual service call)
-    console.log('Syncing:', {
-      type: activeTab,
-      content: searchQuery,
-      metadata: detectedContent?.metadata,
-      timestamp: new Date(),
-      deviceFrom: 'Current Device',
-      deviceTo: 'All Devices'
-    });
-
-    // Clear input after sync
-    setSearchQuery('');
-    setDetectedContent(null);
-  };
-
-  const handleFileSelect = (file: File) => {
-    console.log('Selected file:', file);
-    setSearchQuery(file.name);
-    setActiveTab('file');
-    setShowFileUpload(false);
-  };
+  const renderRecentSyncs = () => (
+    <AnimatePresence mode="popLayout">
+      {recentSyncs.length === 0 ? (
+        renderEmptyState()
+      ) : (
+        recentSyncs.map((sync) => (
+          <motion.div
+            key={sync.id}
+            layout
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="group relative bg-white/[0.03] hover:bg-white/[0.06] backdrop-blur-2xl border border-white/[0.08] rounded-xl p-4 transition-all duration-300"
+          >
+            <div className="flex items-start gap-4">
+              <div className="p-2.5 rounded-lg bg-primary/[0.07] border border-primary/[0.15]">
+                {getIconForType(sync.type)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-white/90 truncate">
+                  {sync.content}
+                </p>
+                <p className="text-xs text-white/50 mt-1">
+                  {formatTimeAgo(sync.timestamp)} • {sync.deviceFrom}
+                </p>
+              </div>
+              <button 
+                className="opacity-0 group-hover:opacity-100 transition-all duration-300"
+                onClick={() => {
+                  navigator.clipboard.writeText(sync.content);
+                  syncToast.success.created('clipboard');
+                }}
+              >
+                <Star className="w-4 h-4 text-primary/80" />
+              </button>
+            </div>
+          </motion.div>
+        ))
+      )}
+    </AnimatePresence>
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background via-background/95 to-background/90">
@@ -223,35 +332,7 @@ export function SyncDashboard() {
                 <h2 className="text-sm font-medium text-white/70">Recent Syncs</h2>
                 <button className="text-xs text-primary/80 hover:text-primary">View All</button>
               </div>
-              <AnimatePresence mode="popLayout">
-                {[1, 2, 3].map((_, i) => (
-                  <motion.div
-                    key={i}
-                    layout
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    className="group relative bg-white/[0.03] hover:bg-white/[0.06] backdrop-blur-2xl border border-white/[0.08] rounded-xl p-4 transition-all duration-300"
-                  >
-                    <div className="flex items-start gap-4">
-                      <div className="p-2.5 rounded-lg bg-primary/[0.07] border border-primary/[0.15]">
-                        <Clipboard className="w-4 h-4 text-primary/90" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-white/90 truncate">
-                          Recent clipboard content...
-                        </p>
-                        <p className="text-xs text-white/50 mt-1">
-                          2m ago • iPhone → MacBook
-                        </p>
-                      </div>
-                      <button className="opacity-0 group-hover:opacity-100 transition-all duration-300">
-                        <Star className="w-4 h-4 text-primary/80" />
-                      </button>
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
+              {renderRecentSyncs()}
             </motion.div>
           </LayoutGroup>
         </div>
@@ -275,7 +356,7 @@ export function SyncDashboard() {
               <input
                 type="text"
                 className="w-full bg-transparent text-[15px] text-white/90 placeholder:text-white/40 focus:outline-none"
-                placeholder={`${activeTab === 'clipboard' ? 'Paste' : activeTab === 'reading' ? 'Enter URL' : activeTab === 'file' ? 'Enter file path' : 'Type note'}`}
+                placeholder={`${activeTab === 'clipboard' ? 'Paste' : activeTab === 'link' ? 'Enter URL' : activeTab === 'file' ? 'Enter file path' : 'Type note'}`}
                 value={searchQuery}
                 onChange={(e) => handleInputChange(e.target.value)}
               />
@@ -315,17 +396,17 @@ export function SyncDashboard() {
           <div className="border-t border-white/[0.08]">
             <div className="flex items-center justify-around px-2 py-3">
               {[
-                { type: 'clipboard', icon: Clipboard, label: 'Paste', color: 'text-blue-400' },
-                { type: 'reading', icon: Book, label: 'Read', color: 'text-emerald-400' },
-                { type: 'file', icon: File, label: 'Share', color: 'text-violet-400' },
-                { type: 'note', icon: StickyNote, label: 'Note', color: 'text-amber-400' },
+                { type: 'clipboard' as const, icon: Clipboard, label: 'Paste', color: 'text-blue-400' },
+                { type: 'note' as const, icon: StickyNote, label: 'Note', color: 'text-amber-400' },
+                { type: 'file' as const, icon: File, label: 'Share', color: 'text-violet-400' },
+                { type: 'link' as const, icon: Book, label: 'Link', color: 'text-emerald-400' },
               ].map(({ type, icon: Icon, label, color }) => (
                 <motion.button
                   key={type}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={() => {
-                    setActiveTab(type as SyncItem['type']);
+                    setActiveTab(type);
                     if (type === 'file') {
                       setShowFileUpload(true);
                     }

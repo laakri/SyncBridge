@@ -18,6 +18,7 @@ import { Device } from '../../entities/device.entity';
 import { DeviceAuthentication } from '../../entities/device-auth.entity';
 import { SecurityEvent } from '../../entities/security-event.entity';
 import { RedisModule } from '../redis/redis.module';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @Module({
   imports: [
@@ -83,7 +84,8 @@ import { RedisModule } from '../redis/redis.module';
       provide: 'Repository',
       useValue: Repository,
     },
+    JwtAuthGuard,
   ],
-  exports: [AuthService, EmailService],
+  exports: [AuthService, EmailService, JwtAuthGuard],
 })
 export class AuthModule {}

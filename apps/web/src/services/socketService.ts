@@ -4,21 +4,8 @@ import axios from 'axios';
 class SocketService {
   private socket: Socket | null = null;
   private isRefreshing = false;
-  private failedQueue: {
-    resolve: (socket: Socket) => void;
-    reject: (error: any) => void;
-  }[] = [];
-
-  private processQueue(error: any, socket: Socket | null) {
-    this.failedQueue.forEach((promise) => {
-      if (error) {
-        promise.reject(error);
-      } else if (socket) {
-        promise.resolve(socket);
-      }
-    });
-    this.failedQueue = [];
-  }
+  private reconnectAttempts = 0;
+  private readonly MAX_RECONNECT_ATTEMPTS = 3;
 
   private async refreshToken() {
     try {
@@ -53,80 +40,115 @@ class SocketService {
   }
 
   async connect() {
-    if (this.socket?.connected) return this.socket;
+    if (this.socket?.connected) {
+      console.log('[Socket] Already connected, reusing connection');
+      return this.socket;
+    }
 
-    this.socket = io(import.meta.env.VITE_API_URL || 'http://localhost:3500', {
-      auth: {
-        token: `Bearer ${localStorage.getItem('access_token')}`,
-        deviceId: localStorage.getItem('current_device_id'),
-      },
-      transports: ['websocket'],
-      reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
+    const token = localStorage.getItem('access_token');
+    const deviceId = localStorage.getItem('current_device_id');
+
+    console.log('[Socket] Connecting with:', { 
+      hasToken: !!token, 
+      deviceId 
     });
 
-    this.socket.on('connect_error', async (error) => {
-      console.error('Socket connection error:', error.message);
-      
-      if (error.message.includes('jwt expired') || error.message.includes('Unauthorized')) {
-        if (this.isRefreshing) {
-          // Wait for the token refresh
-          try {
-            const socket = await new Promise<Socket>((resolve, reject) => {
-              this.failedQueue.push({ resolve, reject });
-            });
-            return socket;
-          } catch (err) {
-            console.error('Failed to refresh token:', err);
-            this.disconnect();
-            return;
-          }
-        }
-
-        this.isRefreshing = true;
-
+    if (!token || !deviceId) {
+      if (localStorage.getItem('refresh_token')) {
         try {
           const newToken = await this.refreshToken();
-          
-          if (this.socket) {
-            this.socket.auth = {
-              ...this.socket.auth,
-              token: `Bearer ${newToken}`,
-            };
-            
-            await this.socket.connect();
-            this.processQueue(null, this.socket);
-          }
-        } catch (refreshError) {
-          console.error('Token refresh failed:', refreshError);
-          this.processQueue(refreshError, null);
-          this.disconnect();
-        } finally {
-          this.isRefreshing = false;
+          return this.createSocketConnection(newToken, deviceId!);
+        } catch (error) {
+          console.error('[Socket] Token refresh failed:', error);
+          throw error;
         }
       }
-    });
+      throw new Error('No authentication tokens found');
+    }
 
-    this.socket.on('connect', () => {
-      console.log('🔌 Socket connected');
-    });
+    return this.createSocketConnection(token, deviceId);
+  }
 
-    this.socket.on('disconnect', (reason) => {
-      console.log('🔌 Socket disconnected:', reason);
-      if (reason === 'io server disconnect') {
-        // Server disconnected us, try to reconnect
-        this.socket?.connect();
+  private createSocketConnection(token: string, deviceId: string) {
+    if (this.socket) {
+      this.socket.disconnect();
+      this.socket = null;
+    }
+
+    const wsUrl = import.meta.env.VITE_WS_URL || 'http://localhost:3500';
+    console.log('[Socket] Creating connection to:', wsUrl);
+
+    this.socket = io(wsUrl, {
+      transports: ['polling', 'websocket'],
+      path: '/socket.io/',
+      auth: {
+        token: `Bearer ${token}`,
+        deviceId
+      },
+      reconnection: true,
+      reconnectionAttempts: this.MAX_RECONNECT_ATTEMPTS,
+      reconnectionDelay: 1000,
+      timeout: 10000,
+      forceNew: true,
+      withCredentials: true,
+      extraHeaders: {
+        'Access-Control-Allow-Credentials': 'true',
       }
     });
 
-    return this.socket;
+    return new Promise<Socket>((resolve, reject) => {
+      if (!this.socket) return reject('Socket not initialized');
+
+      this.socket.on('connect', () => {
+        console.log('[Socket] Connected successfully');
+        this.reconnectAttempts = 0;
+        resolve(this.socket!);
+      });
+
+      this.socket.on('connect_error', async (error) => {
+        console.error('[Socket] Connection error:', error.message);
+        
+        if (error.message.includes('Unauthorized') && this.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
+          this.reconnectAttempts++;
+          try {
+            console.log('[Socket] Attempting token refresh...');
+            const newToken = await this.refreshToken();
+            this.socket?.disconnect();
+            resolve(await this.createSocketConnection(newToken, deviceId));
+          } catch (refreshError) {
+            reject(refreshError);
+          }
+        } else {
+          reject(error);
+        }
+      });
+
+      this.socket.on('disconnect', (reason) => {
+        console.log('[Socket] Disconnected:', reason);
+        if (reason === 'io server disconnect') {
+          this.socket?.connect();
+        }
+      });
+
+      this.socket.on('error', (error) => {
+        console.error('[Socket] Transport error:', error);
+      });
+
+      setTimeout(() => {
+        if (this.socket && !this.socket.connected) {
+          console.log('[Socket] Connection timeout, falling back to polling');
+          this.socket.disconnect();
+          this.socket.connect();
+        }
+      }, 5000);
+    });
   }
 
   disconnect() {
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
+      this.reconnectAttempts = 0;
     }
   }
 

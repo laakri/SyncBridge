@@ -1,8 +1,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { 
-  Laptop, Plus, Smartphone, Monitor, QrCode, Settings, 
-  Trash2, Power, RefreshCw, Shield, Signal, Globe, 
-  CheckCircle2, Clock, 
+  Laptop, Plus, Smartphone, Monitor,  Settings, 
+  Trash2, RefreshCw, Shield, Signal, Globe, Clock, 
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { QRLogin } from "../components/QRLogin";
@@ -11,27 +10,9 @@ import { toast } from "react-hot-toast";
 import { api } from "../lib/api";
 import { cn } from "../lib/utils";
 import { DeviceSettingsModal } from "../components/DeviceSettingsModal";
+import { Device } from "../types/device";
 
-interface Device {
-  device_id: string;
-  device_name: string;
-  device_type: 'desktop' | 'mobile' | 'tablet' | 'other';
-  last_active: string;
-  is_current: boolean;
-  auto_sync: boolean;
-  browser_type?: string;
-  created_at: string;
-  device_settings: Record<string, any>;
-  device_token: string;
-  is_active: boolean;
-  last_ip_address: string;
-  os_type: string;
-  sync_enabled: boolean;
-  sync_interval: number;
-  updated_at: string;
-  user_id: string;
-  is_connected: boolean;
-}
+
 
 interface DeviceEvent {
   deviceId: string;

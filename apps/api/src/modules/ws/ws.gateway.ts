@@ -22,12 +22,37 @@ interface SyncPayload {
   target_devices?: string[];
 }
 
+export interface DeviceStats {
+  clipboard: number;
+  file: number;
+  note: number;
+  link: number;
+}
+export interface Device {
+  device_id: string;
+  device_name: string;
+  is_connected: boolean;
+  last_active: Date;
+}
 @WebSocketGateway({
   cors: {
     origin: process.env.FRONTEND_URL || 'http://localhost:3000',
     credentials: true,
+    methods: ['GET', 'POST'],
+    allowedHeaders: [
+      'Authorization',
+      'device-id',
+      'refresh-token',
+      'Access-Control-Allow-Credentials',
+    ],
+    exposedHeaders: ['Access-Control-Allow-Credentials'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   },
-  transports: ['websocket'],
+  path: '/socket.io/',
+  serveClient: false,
+  transports: ['polling', 'websocket'],
+  allowEIO3: true,
   pingTimeout: 60000,
   pingInterval: 25000,
 })
@@ -45,12 +70,10 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   async handleConnection(client: AuthenticatedSocket) {
     try {
-      console.log('Client attempting to connect:', client.id);
       const token = client.handshake.auth.token?.split(' ')[1];
       const deviceId = client.handshake.auth.deviceId;
 
       if (!token || !deviceId) {
-        console.log('Missing token or deviceId');
         client.disconnect();
         return;
       }
@@ -59,29 +82,29 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const device = await this.authService.findDeviceById(deviceId);
 
       if (!device || device.user_id !== payload.sub) {
-        console.log('Invalid device or user mismatch');
         client.disconnect();
         return;
       }
 
-      // Set user data on socket
       client.user = {
         sub: payload.sub,
         email: payload.email,
         deviceId: deviceId,
       };
 
+      await this.authService.updateDeviceStatus(deviceId, true);
       this.connectedDevices.set(deviceId, client);
       client.join(`user:${payload.sub}`);
-      console.log(`Device ${deviceId} connected successfully`);
 
-      // Notify other devices
-      client.to(`user:${payload.sub}`).emit('device:online', {
-        deviceId,
-        deviceName: device.device_name,
+      const stats = await this.syncService.getDeviceStats(payload.sub);
+      const devices = await this.authService.getUserDevices(payload.sub);
+
+      client.emit('init:data', {
+        stats,
+        devices,
+        currentDevice: device,
       });
     } catch (error) {
-      console.error('Connection error:', error);
       client.disconnect();
     }
   }
@@ -93,10 +116,7 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       )?.[0];
 
       if (deviceId) {
-        console.log(`Device ${deviceId} disconnected`);
         this.connectedDevices.delete(deviceId);
-
-        // Update device status in database
         this.authService.updateDeviceStatus(deviceId, false);
 
         const rooms = Array.from(client.rooms);
@@ -198,6 +218,8 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const userId = client.user.sub;
       const deviceId = client.user.deviceId;
 
+      console.log('Sync request received:', payload);
+
       // Get recent syncs for the device
       const recentSyncs = await this.syncService.getRecentSyncs(
         userId,
@@ -207,11 +229,56 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         payload.limit,
       );
 
-      client.emit('sync:batch', recentSyncs);
+      console.log('Found syncs:', recentSyncs);
+
+      // Transform the data to match the expected format
+      const transformedSyncs = recentSyncs.map((sync) => ({
+        sync_id: sync.sync_id,
+        content: {
+          value: sync.content.value,
+          timestamp: sync.content.timestamp,
+        },
+        content_type: sync.content_type,
+        source_device_id: sync.source_device_id,
+        metadata: sync.metadata,
+        created_at: sync.created_at,
+      }));
+
+      console.log('Sending transformed syncs:', transformedSyncs);
+      client.emit('sync:batch', transformedSyncs);
     } catch (error) {
       console.error('Sync request error:', error);
       client.emit('sync:error', {
         message: 'Failed to fetch syncs',
+        error: error.message,
+      });
+    }
+  }
+
+  @UseGuards(WsJwtGuard)
+  @SubscribeMessage('sync:toggle-favorite')
+  async handleToggleFavorite(
+    client: AuthenticatedSocket,
+    payload: { syncId: string },
+  ) {
+    try {
+      const userId = client.user.sub;
+      const isFavorite = await this.syncService.toggleFavorite(
+        payload.syncId,
+        userId,
+      );
+
+      // Broadcast the update to all user's devices
+      this.server.to(`user:${userId}`).emit('sync:favorite-updated', {
+        syncId: payload.syncId,
+        isFavorite,
+      });
+
+      return { success: true, isFavorite };
+    } catch (error) {
+      console.error('Toggle favorite error:', error);
+      client.emit('sync:error', {
+        message: 'Failed to toggle favorite',
         error: error.message,
       });
     }

@@ -7,6 +7,7 @@ export interface SyncItem {
   timestamp: Date;
   deviceFrom?: string;
   deviceTo?: string;
+  isFavorite?: boolean;
   metadata?: {
     title?: string;
     size?: number;

@@ -606,4 +606,14 @@ export class AuthService {
       },
     );
   }
+
+  async getUserDevices(userId: string): Promise<Device[]> {
+    return this.deviceRepository.find({
+      where: { user_id: userId },
+      order: {
+        is_connected: 'DESC',
+        last_active: 'DESC',
+      },
+    });
+  }
 }

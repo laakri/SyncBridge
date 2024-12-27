@@ -2,8 +2,10 @@ import { motion, AnimatePresence, LayoutGroup } from "framer-motion";
 import { 
   Clipboard, Book, File, StickyNote, Clock, 
   Star, Smartphone, 
-  Command, Zap, X, ArrowRight, Bookmark,
-  InboxIcon
+  Command, Zap, X, ArrowRight, 
+  InboxIcon,
+  Monitor,
+  Laptop
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { cn } from "../../lib/utils";
@@ -12,10 +14,12 @@ import { FileUpload } from './FileUpload';
 import { useNavigate } from "@tanstack/react-router";
 import { socketService } from "../../services/socketService";
 import { Socket } from "socket.io-client";
-import { getIconForType, formatTimeAgo } from "../../utils/sync.utils";
+import {  formatTimeAgo } from "../../utils/sync.utils";
 import { syncToast } from "../../utils/toast.utils";
 import { validateSync } from "../../utils/validation.utils";
 import { ContentType, SyncItem } from "../../types/sync";
+import { Device } from "../../types/device";
+import { SyncItem as SyncItemComponent } from './SyncItem';
 
 export function SyncDashboard() {
   const [activeTab, setActiveTab] = useState<ContentType>('clipboard');
@@ -25,7 +29,10 @@ export function SyncDashboard() {
   const navigate = useNavigate();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [recentSyncs, setRecentSyncs] = useState<SyncItem[]>([]);
-  const [notes, setNotes] = useState<SyncItem[]>([]);
+  const [favorites, setFavorites] = useState<SyncItem[]>([]);
+  const [stats, setStats] = useState<Record<string, number>>({});
+  const [connectedDevices, setConnectedDevices] = useState<Device[]>([]);
+  const [currentDevice, setCurrentDevice] = useState<Device | null>(null);
 
   useEffect(() => {
     const initializeSocket = async () => {
@@ -34,43 +41,105 @@ export function SyncDashboard() {
         setSocket(socketInstance);
         syncToast.connection.connected();
 
+        // Listen for initial data
+        socketInstance.on('init:data', (data) => {
+          console.log('Received initial data:', {
+            stats: data.stats,
+            devices: data.devices,
+            currentDevice: data.currentDevice
+          });
+          setStats(data.stats);
+          setConnectedDevices(data.devices);
+          setCurrentDevice(data.currentDevice);
+        });
+
+        // Listen for batch sync data
+        socketInstance.on('sync:batch', (data) => {
+          console.log('[Dashboard] Received sync batch:', data);
+          if (!Array.isArray(data)) return;
+          
+          // Transform all syncs
+          const transformedSyncs = data.map(sync => ({
+            id: sync.sync_id,
+            type: sync.content_type as ContentType,
+            content: sync.content.value,
+            timestamp: new Date(sync.content.timestamp),
+            deviceFrom: sync.source_device_id,
+            metadata: sync.metadata,
+            isFavorite: sync.is_favorite || false
+          }));
+          
+          // Split into recent and favorites
+          const favorites = transformedSyncs.filter(sync => sync.isFavorite);
+          const recents = transformedSyncs.filter(sync => !sync.isFavorite);
+          
+          // Update states
+          setRecentSyncs(recents.slice(0, 10));
+          setFavorites(favorites.slice(0, 5));
+          
+          console.log('[Dashboard] Processed syncs:', { recents, favorites });
+        });
+
         // Listen for new syncs
         socketInstance.on('sync:data', (data) => {
-          console.log('Received sync data:', data);
-          const newSync = {
+          console.log('Received new sync:', data);
+          if (!data?.content_type) return;
+          
+          const newSync: SyncItem = {
             id: data.sync_id,
-            type: data.content_type,
+            type: data.content_type as ContentType,
             content: data.content.value,
             timestamp: new Date(data.content.timestamp),
             deviceFrom: data.source_device_id,
             metadata: data.metadata
           };
 
-          // Update recent syncs
-          setRecentSyncs(prev => {
-            const updated = [newSync, ...prev].slice(0, 10);
-            console.log('Updated recent syncs:', updated);
-            return updated;
-          });
+          // Update stats
+          setStats(prev => ({
+            ...prev,
+            [data.content_type]: Number(prev[data.content_type] || 0) + 1
+          }));
 
-          // Update notes if applicable
+          // Update recent syncs or notes based on type
           if (data.content_type === 'note') {
-            setNotes(prev => {
-              const updated = [newSync, ...prev].slice(0, 5);
-              console.log('Updated notes:', updated);
-              return updated;
-            });
+            setFavorites(prev => [newSync, ...prev].slice(0, 5));
+          } else {
+            setRecentSyncs(prev => [newSync, ...prev].slice(0, 10));
           }
-
-          syncToast.success.received(data.content_type);
         });
 
-        // Request recent syncs
+        // Request initial syncs (get all types)
+        console.log('[Dashboard] Requesting initial syncs...');
         socketInstance.emit('sync:request', { limit: 10 });
-        console.log('Requested recent syncs');
+
+        // Handle favorite toggle updates
+        socketInstance.on('sync:favorite-updated', (data) => {
+          const { syncId, isFavorite } = data;
+          
+          // Update recent syncs
+          setRecentSyncs(prev => prev.map(sync => 
+            sync.id === syncId ? { ...sync, isFavorite } : sync
+          ));
+          
+          // Update favorites list
+          if (isFavorite) {
+            const sync = recentSyncs.find(s => s.id === syncId);
+            if (sync) {
+              setFavorites(prev => [{ ...sync, isFavorite: true }, ...prev].slice(0, 5));
+            }
+          } else {
+            setFavorites(prev => prev.filter(s => s.id !== syncId));
+          }
+        });
+
+        // Handle favorites list updates
+        socketInstance.on('sync:favorites-updated', (data) => {
+          console.log('[Dashboard] Favorites list updated:', data);
+          setFavorites(data);
+        });
 
       } catch (error) {
-        console.error('Socket connection error:', error);
+        console.error('[Dashboard] Socket connection error:', error);
         syncToast.error.connection();
       }
     };
@@ -79,12 +148,24 @@ export function SyncDashboard() {
 
     return () => {
       if (socket) {
+        socket.off('init:data');
+        socket.off('sync:batch');
         socket.off('sync:data');
         socket.disconnect();
       }
     };
   }, []);
-
+  const getDeviceIcon = (type: Device['device_type'] | undefined) => {
+    const iconProps = "w-6 h-6";
+    switch (type) {
+      case 'mobile':
+        return <Smartphone className={iconProps} />;
+      case 'desktop':
+        return <Monitor className={iconProps} />;
+      default:
+        return <Laptop className={iconProps} />;
+    }
+  };
   const handleSync = () => {
     if (!searchQuery.trim() || !socket) return;
 
@@ -163,41 +244,110 @@ export function SyncDashboard() {
         renderEmptyState()
       ) : (
         recentSyncs.map((sync) => (
-          <motion.div
+          <SyncItemComponent
             key={sync.id}
-            layout
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            className="group relative bg-white/[0.03] hover:bg-white/[0.06] backdrop-blur-2xl border border-white/[0.08] rounded-xl p-4 transition-all duration-300"
-          >
-            <div className="flex items-start gap-4">
-              <div className="p-2.5 rounded-lg bg-primary/[0.07] border border-primary/[0.15]">
-                {getIconForType(sync.type)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-white/90 truncate">
-                  {sync.content}
-                </p>
-                <p className="text-xs text-white/50 mt-1">
-                  {formatTimeAgo(sync.timestamp)} • {sync.deviceFrom}
-                </p>
-              </div>
-              <button 
-                className="opacity-0 group-hover:opacity-100 transition-all duration-300"
-                onClick={() => {
-                  navigator.clipboard.writeText(sync.content);
-                  syncToast.success.created('clipboard');
-                }}
-              >
-                <Star className="w-4 h-4 text-primary/80" />
-              </button>
-            </div>
-          </motion.div>
+            sync={sync}
+            onCopy={() => syncToast.success.created('clipboard')}
+            onToggleFavorite={handleToggleFavorite}
+          />
         ))
       )}
     </AnimatePresence>
   );
+
+  const renderFavorites = () => (
+    <motion.div 
+      layout 
+      className="mb-6"
+      initial={{ opacity: 0, y: -20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+    >
+      <div className="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-xl p-4">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Star className="w-4 h-4 text-amber-400/80" />
+            <h2 className="text-sm font-medium text-white/70">Favorites</h2>
+          </div>
+        </div>
+        <AnimatePresence mode="popLayout">
+          <div className="space-y-3">
+            {favorites.length === 0 ? (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="text-center py-4 text-white/40 text-sm"
+              >
+                No favorites yet. Star items to add them here!
+              </motion.div>
+            ) : (
+              favorites.map((sync) => (
+                <motion.div
+                  key={sync.id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                >
+                  <SyncItemComponent
+                    sync={sync}
+                    onCopy={() => syncToast.success.created('clipboard')}
+                    onToggleFavorite={handleToggleFavorite}
+                    isFavorite={true}
+                  />
+                </motion.div>
+              ))
+            )}
+          </div>
+        </AnimatePresence>
+      </div>
+    </motion.div>
+  );
+
+  const renderQuickStats = () => (
+    <motion.div layout className="grid grid-cols-3 gap-3 mb-6">
+      {[
+        { label: 'Clips', type: 'clipboard', icon: Clipboard },
+        { label: 'Files', type: 'file', icon: File },
+        { label: 'Notes', type: 'note', icon: StickyNote },
+      ].map(({ label, type, icon: Icon }) => (
+        <div key={type} className="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-xl p-4">
+          <Icon className="w-4 h-4 text-primary/80 mb-2" />
+          <p className="text-2xl font-semibold text-white/90">{stats[type] || 0}</p>
+          <p className="text-xs text-white/50">{label}</p>
+        </div>
+      ))}
+    </motion.div>
+  );
+
+  const handleToggleFavorite = (syncId: string) => {
+    if (!socket) return;
+    
+    console.log('[Dashboard] Toggling favorite for sync:', syncId);
+    socket.emit('sync:toggle-favorite', { syncId });
+    
+    // Optimistic update
+    const sync = recentSyncs.find(s => s.id === syncId);
+    if (sync) {
+      const isFavorite = !sync.isFavorite;
+      
+      // Update recent syncs
+      setRecentSyncs(prev => 
+        prev.map(s => s.id === syncId ? { ...s, isFavorite } : s)
+      );
+      
+      // Update favorites
+      if (isFavorite) {
+        setFavorites(prev => [{ ...sync, isFavorite: true }, ...prev].slice(0, 5));
+      } else {
+        setFavorites(prev => prev.filter(s => s.id !== syncId));
+      }
+      
+      // Request fresh data from server
+      socket.emit('sync:request', { limit: 10 });
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background via-background/95 to-background/90">
@@ -250,13 +400,33 @@ export function SyncDashboard() {
               <div className="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-xl p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-lg bg-primary/[0.07] border border-primary/[0.15]">
-                      <Smartphone className="w-5 h-5 text-primary/90" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-white/90">iPhone 14 Pro</p>
-                      <p className="text-xs text-white/50">Connected • Last sync 2m ago</p>
-                    </div>
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className={cn(
+                        "p-2.5 rounded-xl transition-all duration-300 ease-in-out",
+                        currentDevice?.is_active 
+                          ? "bg-primary/5 border border-primary/10 shadow-lg shadow-primary/5" 
+                          : "bg-white/[0.03] border border-white/[0.08] hover:bg-white/[0.05]"
+                      )}>
+                      {getDeviceIcon(currentDevice?.device_type)}
+                    </motion.div>
+                    <motion.div
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.1 }}
+                      className="space-y-1"
+                    >
+                      <p className="font-medium text-white/90 transition-colors duration-200 hover:text-white">
+                        {currentDevice?.device_name?.split(' - ')?.[0] || 'Unknown Device'}
+                      </p>
+                      <p className="text-xs text-white/50 transition-opacity duration-200">
+                        {currentDevice?.os_type ? currentDevice.os_type.charAt(0).toUpperCase() + currentDevice.os_type.slice(1) : 'Unknown OS'} • {currentDevice?.browser_type || 'Unknown Browser'}
+                      </p>
+                      <p className="text-xs text-white/40 transition-opacity duration-200">
+                        {currentDevice?.last_active ? new Date(currentDevice.last_active).toLocaleString() : 'Never'}
+                      </p>
+                    </motion.div>
                   </div>
                   <motion.button
                     whileHover={{ scale: 1.02, x: 2 }}
@@ -272,59 +442,10 @@ export function SyncDashboard() {
             </motion.div>
 
             {/* Quick Stats */}
-            <motion.div layout className="grid grid-cols-3 gap-3 mb-6">
-              {[
-                { label: 'Clips', count: 12, icon: Clipboard },
-                { label: 'Files', count: 8, icon: File },
-                { label: 'Notes', count: 4, icon: StickyNote },
-              ].map(({ label, count, icon: Icon }) => (
-                <div key={label} className="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-xl p-4">
-                  <Icon className="w-4 h-4 text-primary/80 mb-2" />
-                  <p className="text-2xl font-semibold text-white/90">{count}</p>
-                  <p className="text-xs text-white/50">{label}</p>
-                </div>
-              ))}
-            </motion.div>
+            {renderQuickStats()}
 
-            {/* Reading List Section */}
-            <motion.div layout className="mb-6">
-              <div className="bg-white/[0.03] backdrop-blur-2xl border border-white/[0.08] rounded-xl p-4">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="flex items-center gap-2">
-                    <Bookmark className="w-4 h-4 text-emerald-400/80" />
-                    <h2 className="text-sm font-medium text-white/70">Reading List</h2>
-                  </div>
-                  <button className="text-xs text-primary/80 hover:text-primary">View All</button>
-                </div>
-                <div className="space-y-3">
-                  {[1, 2].map((_, i) => (
-                    <motion.div
-                      key={i}
-                      initial={false}
-                      layout
-                      className="group relative bg-white/[0.03] hover:bg-white/[0.06] backdrop-blur-sm border border-white/[0.08] rounded-lg p-3 transition-all duration-300"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-emerald-400/10 flex items-center justify-center">
-                          <Book className="w-5 h-5 text-emerald-400/80" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-white/90 truncate">
-                            How to Build a Better Design System
-                          </p>
-                          <p className="text-xs text-white/50 mt-1">
-                            5 min read • Added 2h ago
-                          </p>
-                        </div>
-                        <button className="opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Star className="w-4 h-4 text-amber-400/80" />
-                        </button>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
+            {/* Favorites */}
+            {renderFavorites()}
 
             {/* Recent Syncs */}
             <motion.div layout className="space-y-3">

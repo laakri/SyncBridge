@@ -12,6 +12,13 @@ import { SyncStatus, SyncState } from '../../entities/sync-status.entity';
 import { Device } from '../../entities/device.entity';
 import { WsGateway } from '../ws/ws.gateway';
 
+export interface DeviceStats {
+  clipboard: number;
+  file: number;
+  note: number;
+  link: number;
+}
+
 @Injectable()
 export class SyncService {
   constructor(
@@ -116,13 +123,18 @@ export class SyncService {
     since?: Date,
     limit: number = 50,
   ) {
+    console.log('Getting recent syncs with params:', {
+      userId,
+      deviceId,
+      contentType,
+      since,
+      limit,
+    });
+
     const query = this.syncDataRepository
       .createQueryBuilder('sync')
       .where('sync.user_id = :userId', { userId })
-      .andWhere('sync.source_device_id != :deviceId', { deviceId })
-      .andWhere('sync.is_deleted = false')
-      .orderBy('sync.created_at', 'DESC')
-      .take(limit);
+      .andWhere('sync.is_deleted = false');
 
     if (contentType) {
       query.andWhere('sync.content_type = :contentType', { contentType });
@@ -132,11 +144,79 @@ export class SyncService {
       query.andWhere('sync.created_at > :since', { since });
     }
 
-    return query.getMany();
+    const syncs = await query
+      .orderBy('sync.created_at', 'DESC')
+      .take(limit)
+      .getMany();
+
+    console.log(`Found ${syncs.length} syncs`);
+    return syncs;
   }
 
   private async generateChecksum(content: string): Promise<string> {
     const crypto = require('crypto');
     return crypto.createHash('sha256').update(content).digest('hex');
+  }
+
+  async getDeviceStats(userId: string): Promise<DeviceStats> {
+    const stats = await this.syncDataRepository
+      .createQueryBuilder('sync')
+      .select('sync.content_type', 'type')
+      .addSelect('COUNT(*)', 'count')
+      .where('sync.user_id = :userId', { userId })
+      .andWhere('sync.is_deleted = false')
+      .groupBy('sync.content_type')
+      .getRawMany();
+
+    console.log('Device stats:', stats);
+
+    return {
+      clipboard: parseInt(
+        stats.find((s) => s.type === 'clipboard')?.count || '0',
+      ),
+      file: parseInt(stats.find((s) => s.type === 'file')?.count || '0'),
+      note: parseInt(stats.find((s) => s.type === 'note')?.count || '0'),
+      link: parseInt(stats.find((s) => s.type === 'link')?.count || '0'),
+    };
+  }
+
+  async getFavoriteSyncs(userId: string, limit: number = 5) {
+    return await this.syncDataRepository.find({
+      where: {
+        user_id: userId,
+        is_favorite: true,
+        is_deleted: false,
+      },
+      order: {
+        created_at: 'DESC',
+      },
+      take: limit,
+    });
+  }
+
+  async toggleFavorite(syncId: string, userId: string): Promise<boolean> {
+    console.log('[SyncService] Toggling favorite for sync:', syncId);
+
+    const sync = await this.syncDataRepository.findOne({
+      where: {
+        sync_id: syncId,
+        user_id: userId,
+        is_deleted: false,
+      },
+    });
+
+    if (!sync) {
+      throw new Error('Sync not found');
+    }
+
+    sync.is_favorite = !sync.is_favorite;
+    await this.syncDataRepository.save(sync);
+
+    console.log('[SyncService] Updated favorite status:', {
+      syncId,
+      isFavorite: sync.is_favorite,
+    });
+
+    return sync.is_favorite;
   }
 }

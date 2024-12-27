@@ -14,7 +14,7 @@ import { SyncStatus } from './sync-status.entity';
 
 export enum ContentType {
   CLIPBOARD = 'clipboard',
-  READING = 'reading',
+  LINK = 'link',
   FILE = 'file',
   NOTE = 'note',
 }
@@ -46,8 +46,8 @@ export class SyncData {
   @Column({ default: false })
   is_deleted: boolean;
 
-  @Column({ default: false })
-  is_pinned: boolean;
+  @Column({ name: 'is_favorite', default: false })
+  is_favorite: boolean;
 
   @Column({ default: 1 })
   version: number;

@@ -1,7 +1,5 @@
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Copy, ExternalLink } from "lucide-react";
-import { useState } from "react";
-import { syncToast } from "../../utils/toast.utils";
+import { X} from "lucide-react";
 import { cn } from "../../lib/utils";
 
 interface ContentPopupProps {
@@ -29,14 +27,8 @@ export function ContentPopup({
   timestamp,
   actions
 }: ContentPopupProps) {
-  const [copied, setCopied] = useState(false);
 
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(content);
-    setCopied(true);
-    syncToast.success.created('clipboard');
-    setTimeout(() => setCopied(false), 2000);
-  };
+  
 
   return (
     <AnimatePresence>

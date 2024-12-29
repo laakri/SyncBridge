@@ -39,7 +39,7 @@ export function Navbar() {
       <motion.nav
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl border-b border-white/[0.08]"
+        className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl "
       >
         <div className="mx-auto px-4 sm:px-6">
           <div className="flex h-16 items-center justify-between">
@@ -59,12 +59,13 @@ export function Navbar() {
                 {/* Sync Interface Button */}
                 <Link
                   to="/sync"
-                  className="group relative px-4 py-2 rounded-xl bg-gradient-to-r from-primary/20 to-accent/20 hover:from-primary/30 hover:to-accent/30 border border-white/20 transition-all duration-300"
+                  className="group relative px-3.5 py-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.08] backdrop-blur-xl shadow-sm transition-all duration-200"
                 >
-                  <div className="absolute inset-0 rounded-xl bg-primary/5 blur-sm group-hover:blur-md transition-all" />
-                  <div className="relative flex items-center gap-2">
-                    <Activity className="w-4 h-4 text-primary-light" />
-                    <span className="text-sm font-medium bg-gradient-to-r from-primary-light to-accent bg-clip-text text-white">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-md bg-gradient-to-b from-primary/20 to-primary/10">
+                      <Activity className="w-3.5 h-3.5 text-primary-light" />
+                    </div>
+                    <span className="text-[13px] font-medium text-white/90">
                       Sync Interface
                     </span>
                   </div>
@@ -73,14 +74,16 @@ export function Navbar() {
                 {/* Devices Button */}
                 <Link
                   to="/devices"
-                  className="group relative px-4 py-2 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.08] transition-all duration-300"
+                  className="group relative px-3.5 py-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.08] backdrop-blur-xl shadow-sm transition-all duration-200"
                 >
                   <div className="flex items-center gap-2">
-                    <div className="flex -space-x-1">
-                      <Laptop className="w-4 h-4 text-white/70" />
-                      <Smartphone className="w-4 h-4 text-white/70" />
+                    <div className="p-1.5 rounded-md bg-gradient-to-b from-violet-400/20 to-violet-400/10">
+                      <div className="flex -space-x-1">
+                        <Laptop className="w-3.5 h-3.5 text-violet-400" />
+                        <Smartphone className="w-3.5 h-3.5 text-violet-400" />
+                      </div>
                     </div>
-                    <span className="text-sm font-medium text-white/70 group-hover:text-white/90">
+                    <span className="text-[13px] font-medium text-white/90">
                       Devices
                     </span>
                   </div>
@@ -88,14 +91,18 @@ export function Navbar() {
 
                 {/* Search Button */}
                 <motion.button
-                  whileHover={{ scale: 1.02 }}
+                  whileHover={{ scale: 1.01 }}
                   whileTap={{ scale: 0.98 }}
                   onClick={() => setShowSearch(true)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/[0.08] transition-all"
+                  className="flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.08] backdrop-blur-xl shadow-sm transition-all duration-200"
                 >
-                  <Search className="w-4 h-4 text-white/70" />
-                  <span className="hidden sm:inline text-sm text-white/70">Search</span>
-                  <kbd className="hidden sm:inline-flex h-5 select-none items-center gap-1 rounded border border-white/[0.08] bg-white/[0.02] px-1.5 font-mono text-[10px] font-medium text-white/50">
+                  <div className="p-1.5 rounded-md bg-gradient-to-b from-amber-400/20 to-amber-400/10">
+                    <Search className="w-3.5 h-3.5 text-amber-400" />
+                  </div>
+                  <span className="hidden sm:inline text-[13px] font-medium text-white/90">
+                    Search
+                  </span>
+                  <kbd className="hidden sm:inline-flex h-[18px] select-none items-center gap-0.5 rounded border border-white/[0.1] bg-white/[0.03] px-1.5 font-mono text-[10px] font-medium text-white/40">
                     ⌘K
                   </kbd>
                 </motion.button>

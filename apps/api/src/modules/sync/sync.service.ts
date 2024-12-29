@@ -4,6 +4,7 @@ import {
   ConflictException,
   Inject,
   forwardRef,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -11,6 +12,7 @@ import { SyncData, ContentType } from '../../entities/sync-data.entity';
 import { SyncStatus, SyncState } from '../../entities/sync-status.entity';
 import { Device } from '../../entities/device.entity';
 import { WsGateway } from '../ws/ws.gateway';
+import { RedisService } from '../redis/redis.service';
 
 export interface DeviceStats {
   clipboard: number;
@@ -21,6 +23,8 @@ export interface DeviceStats {
 
 @Injectable()
 export class SyncService {
+  private readonly logger = new Logger('SyncService');
+
   constructor(
     @InjectRepository(SyncData)
     private syncDataRepository: Repository<SyncData>,
@@ -30,6 +34,7 @@ export class SyncService {
     private deviceRepository: Repository<Device>,
     @Inject(forwardRef(() => WsGateway))
     private wsGateway: WsGateway,
+    private readonly redisService: RedisService,
   ) {}
 
   async createSync(
@@ -66,6 +71,29 @@ export class SyncService {
     });
 
     const savedSync = await this.syncDataRepository.save(syncData);
+
+    // Cache the new sync data
+    await this.redisService.cacheSyncData(
+      data.content_type,
+      userId,
+      {
+        ...savedSync,
+        content: data.content,
+        metadata: data.metadata,
+      },
+      savedSync.sync_id,
+    );
+
+    // Update recent syncs cache
+    const cachedRecent = await this.redisService.getCachedSync(
+      'recent',
+      userId,
+    );
+    if (cachedRecent) {
+      // Add new sync to the beginning of the array and maintain limit
+      const updatedRecent = [savedSync, ...cachedRecent].slice(0, 50);
+      await this.redisService.cacheRecentSyncs(userId, updatedRecent);
+    }
 
     // Create initial sync status for source device
     await this.syncStatusRepository.save({
@@ -123,14 +151,29 @@ export class SyncService {
     since?: Date,
     limit: number = 50,
   ) {
-    console.log('Getting recent syncs with params:', {
-      userId,
-      deviceId,
-      contentType,
-      since,
-      limit,
-    });
+    this.logger.debug(`Fetching recent syncs for user ${userId}`);
 
+    // Try to get from cache first
+    const cachedSyncs = await this.redisService.getCachedSync('recent', userId);
+
+    if (cachedSyncs) {
+      this.logger.debug(`Found cached syncs for user ${userId}`);
+      // Filter cached results based on parameters
+      const filtered = this.filterCachedSyncs(
+        cachedSyncs,
+        contentType,
+        since,
+        limit,
+      );
+      this.logger.debug(
+        `Returning ${filtered.length} filtered syncs from cache`,
+      );
+      return filtered;
+    }
+
+    this.logger.debug(`No cache found, querying database for user ${userId}`);
+
+    // If not in cache, get from database
     const query = this.syncDataRepository
       .createQueryBuilder('sync')
       .where('sync.user_id = :userId', { userId })
@@ -149,8 +192,31 @@ export class SyncService {
       .take(limit)
       .getMany();
 
-    console.log(`Found ${syncs.length} syncs`);
+    this.logger.debug(`Found ${syncs.length} syncs in database`);
+
+    // Cache the results
+    await this.redisService.cacheRecentSyncs(userId, syncs);
+
     return syncs;
+  }
+
+  private filterCachedSyncs(
+    syncs: any[],
+    contentType?: ContentType,
+    since?: Date,
+    limit: number = 50,
+  ) {
+    let filtered = syncs;
+
+    if (contentType) {
+      filtered = filtered.filter((sync) => sync.content_type === contentType);
+    }
+
+    if (since) {
+      filtered = filtered.filter((sync) => new Date(sync.created_at) > since);
+    }
+
+    return filtered.slice(0, limit);
   }
 
   private async generateChecksum(content: string): Promise<string> {
@@ -237,6 +303,10 @@ export class SyncService {
 
     sync.is_deleted = true;
     await this.syncDataRepository.save(sync);
+
+    // Invalidate related caches
+    await this.redisService.invalidateCache('sync', userId, syncId);
+    await this.redisService.invalidateCache('recent', userId);
 
     console.log('[SyncService] Sync marked as deleted:', syncId);
     return true;

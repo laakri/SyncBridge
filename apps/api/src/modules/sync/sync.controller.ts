@@ -49,4 +49,12 @@ export class SyncController {
       limit,
     );
   }
+
+  @Get('health')
+  async healthCheck() {
+    return {
+      status: 'ok',
+      timestamp: new Date().toISOString(),
+    };
+  }
 }

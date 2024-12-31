@@ -2,6 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import { ConfigService } from '@nestjs/config';
 
+export type CacheType =
+  | 'clipboard'
+  | 'link'
+  | 'file'
+  | 'note'
+  | 'favorites'
+  | 'recent';
+
 @Injectable()
 export class RedisService {
   private readonly redis: Redis;
@@ -12,7 +20,8 @@ export class RedisService {
     CLIPBOARD: 24 * 60 * 60, // 24 hours
     LINK: 24 * 60 * 60, // 24 hours (increased from 1 hour)
     NOTE: 24 * 60 * 60, // 24 hours (increased from 12 hours)
-    FILE_PATH: 7 * 24 * 60 * 60, // 7 days
+    FILE: 7 * 24 * 60 * 60, // 7 days
+    FAVORITES: 24 * 60 * 60, // 24 hours
     RECENT: 24 * 60 * 60, // 24 hours for recent syncs
   };
 
@@ -41,14 +50,14 @@ export class RedisService {
    * Cache sync data with appropriate TTL
    */
   async cacheSyncData(
-    type: 'clipboard' | 'link' | 'note' | 'file',
+    type: CacheType,
     userId: string,
     data: any,
     identifier?: string,
   ): Promise<void> {
     try {
       const key = this.generateKey(type, userId, identifier);
-      const ttl = this.TTL[type.toUpperCase()] || this.TTL.CLIPBOARD;
+      const ttl = this.TTL[type.toUpperCase()] || this.TTL.RECENT;
 
       this.logger.debug(`Caching data for key: ${key} with TTL: ${ttl}`);
 

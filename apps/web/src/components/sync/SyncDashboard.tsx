@@ -60,51 +60,36 @@ export function SyncDashboard() {
             setStats(data.stats);
           }
 
-          // Transform recent syncs
+          // Transform and deduplicate syncs
+          const transformSync = (sync: any) => ({
+            id: sync.sync_id,
+            type: sync.content_type as ContentType,
+            content: sync.content.value,
+            timestamp: new Date(sync.content.timestamp),
+            deviceFrom: sync.source_device_id,
+            metadata: sync.metadata,
+            isFavorite: Boolean(sync.is_favorite) // Ensure boolean value
+          });
+
+          // Handle recent syncs
           if (data.recent) {
-            const transformedRecents = data.recent.map((sync: { 
-              sync_id: string;
-              content_type: string;
-              content: {
-                value: string;
-                timestamp: string;
-              };
-              source_device_id: string;
-              metadata?: Record<string, any>;
-              is_favorite?: boolean;
-            }) => ({
-              id: sync.sync_id,
-              type: sync.content_type as ContentType,
-              content: sync.content.value,
-              timestamp: new Date(sync.content.timestamp),
-              deviceFrom: sync.source_device_id,
-              metadata: sync.metadata,
-              isFavorite: sync.is_favorite || false
-            }));
+            const transformedRecents = data.recent
+              .map(transformSync)
+              .filter((sync: SyncItem, index: number, self: SyncItem[]) => 
+                // Remove duplicates based on ID
+                index === self.findIndex((s: SyncItem) => s.id === sync.id)
+              );
             setRecentSyncs(transformedRecents);
           }
 
-          // Transform favorites
+          // Handle favorites
           if (data.favorites) {
-            const transformedFavorites = data.favorites.map((sync: { 
-              sync_id: string;
-              content_type: string;
-              content: {
-                value: string;
-                timestamp: string;
-              };
-              source_device_id: string;
-              metadata?: Record<string, any>;
-              is_favorite?: boolean;
-            }) => ({
-              id: sync.sync_id,
-              type: sync.content_type as ContentType,
-              content: sync.content.value,
-              timestamp: new Date(sync.content.timestamp),
-              deviceFrom: sync.source_device_id,
-              metadata: sync.metadata,
-              isFavorite: true
-            }));
+            const transformedFavorites = data.favorites
+              .map(transformSync)
+              .filter((sync: SyncItem, index: number, self: SyncItem[]) => 
+                // Remove duplicates based on ID
+                index === self.findIndex((s: SyncItem) => s.id === sync.id)
+              );
             setFavorites(transformedFavorites);
           }
         });
@@ -153,8 +138,8 @@ export function SyncDashboard() {
           // Update favorites list
           if (isFavorite) {
             const sync = recentSyncs.find(s => s.id === syncId);
-            if (sync) {
-              setFavorites(prev => [{ ...sync, isFavorite: true }, ...prev].slice(0, 5));
+            if (sync && !favorites.some(f => f.id === syncId)) {
+              setFavorites(prev => [{ ...sync, isFavorite: true }, ...prev]);
             }
           } else {
             setFavorites(prev => prev.filter(s => s.id !== syncId));

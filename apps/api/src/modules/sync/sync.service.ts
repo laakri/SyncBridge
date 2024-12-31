@@ -13,6 +13,7 @@ import { SyncStatus, SyncState } from '../../entities/sync-status.entity';
 import { Device } from '../../entities/device.entity';
 import { WsGateway } from '../ws/ws.gateway';
 import { RedisService } from '../redis/redis.service';
+import { CacheType } from '../redis/redis.service';
 
 export interface DeviceStats {
   clipboard: number;
@@ -158,7 +159,7 @@ export class SyncService {
 
     if (cachedSyncs) {
       this.logger.debug(`Found cached syncs for user ${userId}`);
-      // Filter cached results based on parameters
+      // Filter cached results based on parameters (but don't exclude favorites)
       const filtered = this.filterCachedSyncs(
         cachedSyncs,
         contentType,
@@ -277,6 +278,28 @@ export class SyncService {
 
     sync.is_favorite = !sync.is_favorite;
     await this.syncDataRepository.save(sync);
+
+    // Update recent syncs cache - just update the favorite status
+    const cachedRecent = await this.redisService.getCachedSync(
+      'recent',
+      userId,
+    );
+    if (cachedRecent) {
+      const updatedRecent = cachedRecent.map((item) =>
+        item.sync_id === syncId
+          ? { ...item, is_favorite: sync.is_favorite }
+          : item,
+      );
+      await this.redisService.cacheRecentSyncs(userId, updatedRecent);
+    }
+
+    // Update favorites cache
+    const favorites = await this.getFavoriteSyncs(userId);
+    await this.redisService.cacheSyncData(
+      'favorites' as CacheType,
+      userId,
+      favorites,
+    );
 
     console.log('[SyncService] Updated favorite status:', {
       syncId,

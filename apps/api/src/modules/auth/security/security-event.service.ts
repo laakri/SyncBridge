@@ -1,6 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { In } from 'typeorm';
 
 import { User } from '../../../entities/user.entity';
 import { Device } from '../../../entities/device.entity';
@@ -15,6 +16,8 @@ export class SecurityEventService {
   constructor(
     @InjectRepository(SecurityEvent)
     private securityEventRepository: Repository<SecurityEvent>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
   ) {}
 
   async logLoginEvent(
@@ -131,14 +134,45 @@ export class SecurityEventService {
 
   async getRecentEvents(
     user: User,
-    limit: number = 10,
+    options: {
+      limit?: number;
+      severity?: SecurityEventSeverity[];
+      eventTypes?: SecurityEventType[];
+      startDate?: Date;
+      endDate?: Date;
+    } = {},
   ): Promise<SecurityEvent[]> {
-    return this.securityEventRepository.find({
-      where: { user_id: user.user_id },
-      order: { created_at: 'DESC' },
-      take: limit,
-      relations: ['device'],
-    });
+    const query = this.securityEventRepository
+      .createQueryBuilder('event')
+      .where('event.user_id = :userId', { userId: user.user_id })
+      .leftJoinAndSelect('event.device', 'device')
+      .orderBy('event.created_at', 'DESC');
+
+    if (options.severity?.length) {
+      query.andWhere('event.severity IN (:...severities)', {
+        severities: options.severity,
+      });
+    }
+
+    if (options.eventTypes?.length) {
+      query.andWhere('event.event_type IN (:...types)', {
+        types: options.eventTypes,
+      });
+    }
+
+    if (options.startDate) {
+      query.andWhere('event.created_at >= :startDate', {
+        startDate: options.startDate,
+      });
+    }
+
+    if (options.endDate) {
+      query.andWhere('event.created_at <= :endDate', {
+        endDate: options.endDate,
+      });
+    }
+
+    return query.take(options.limit || 10).getMany();
   }
 
   async getUnresolvedEvents(user: User): Promise<SecurityEvent[]> {
@@ -151,6 +185,120 @@ export class SecurityEventService {
       order: { created_at: 'DESC' },
       relations: ['device'],
     });
+  }
+
+  async logProfileEvent(
+    user: User,
+    device: Device,
+    action: 'update' | 'email_change' | 'settings_change',
+    details: string,
+    ipAddress?: string,
+  ): Promise<SecurityEvent> {
+    const eventType =
+      action === 'update'
+        ? SecurityEventType.PROFILE_UPDATED
+        : action === 'email_change'
+          ? SecurityEventType.EMAIL_CHANGED
+          : SecurityEventType.SECURITY_SETTINGS_CHANGED;
+
+    return this.createSecurityEvent({
+      user,
+      device,
+      event_type: eventType,
+      severity: SecurityEventSeverity.MEDIUM,
+      event_description: details,
+      ip_address: ipAddress,
+    });
+  }
+
+  async logAccountSecurityEvent(
+    user: User,
+    device: Device,
+    action: 'lock' | 'unlock',
+    reason: string,
+    ipAddress?: string,
+  ): Promise<SecurityEvent> {
+    return this.createSecurityEvent({
+      user,
+      device,
+      event_type:
+        action === 'lock'
+          ? SecurityEventType.ACCOUNT_LOCKED
+          : SecurityEventType.ACCOUNT_UNLOCKED,
+      severity: SecurityEventSeverity.HIGH,
+      event_description: reason,
+      ip_address: ipAddress,
+    });
+  }
+
+  async resolveSecurityEvent(
+    eventId: string,
+    userId: string,
+    resolutionNotes: string,
+  ): Promise<SecurityEvent> {
+    const event = await this.securityEventRepository.findOne({
+      where: { event_id: eventId, user_id: userId },
+    });
+
+    if (!event) {
+      throw new NotFoundException('Security event not found');
+    }
+
+    event.is_resolved = true;
+    event.resolved_at = new Date();
+    event.resolution_notes = resolutionNotes;
+
+    return this.securityEventRepository.save(event);
+  }
+
+  async getSecuritySummary(userId: string): Promise<{
+    recentEvents: SecurityEvent[];
+    highSeverityCount: number;
+    unresolvedCount: number;
+    lastLoginAttempt: SecurityEvent | null;
+  }> {
+    const user = await this.userRepository.findOne({
+      where: { user_id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const [recentEvents, highSeverityCount, unresolvedCount, lastLoginAttempt] =
+      await Promise.all([
+        this.getRecentEvents(user, { limit: 5 }),
+        this.securityEventRepository.count({
+          where: {
+            user_id: userId,
+            severity: SecurityEventSeverity.HIGH,
+            is_resolved: false,
+          },
+        }),
+        this.securityEventRepository.count({
+          where: {
+            user_id: userId,
+            is_resolved: false,
+          },
+        }),
+        this.securityEventRepository.findOne({
+          where: {
+            user_id: userId,
+            event_type: In([
+              SecurityEventType.LOGIN_SUCCESS,
+              SecurityEventType.LOGIN_FAILED,
+            ]),
+          },
+          order: { created_at: 'DESC' },
+        }),
+      ]);
+
+    return {
+      recentEvents,
+      highSeverityCount,
+      unresolvedCount,
+      lastLoginAttempt,
+    };
   }
 
   private async createSecurityEvent(params: {

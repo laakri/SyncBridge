@@ -92,4 +92,18 @@ export class EmailService {
       },
     );
   }
+
+  async sendAccountLockNotification(user: User, reason: string): Promise<void> {
+    await this.sendEmail(
+      user.email,
+      'Account Security Alert: Your Account Has Been Locked',
+      'account-lock',
+      {
+        name: user.full_name || user.username,
+        reason: reason,
+        lockedAt: new Date().toLocaleString(),
+        supportEmail: process.env.SUPPORT_EMAIL || 'support@yourdomain.com',
+      },
+    );
+  }
 }

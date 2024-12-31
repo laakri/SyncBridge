@@ -12,6 +12,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { WsModule } from './modules/ws/ws.module';
 import { DevicesModule } from './modules/devices/devices.module';
+import { ProfileModule } from './modules/profile/profile.module';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { DevicesModule } from './modules/devices/devices.module';
     WsModule,
     AuthModule,
     DevicesModule,
+    ProfileModule,
   ],
   providers: [
     {

@@ -18,6 +18,13 @@ export enum SecurityEventType {
   PASSWORD_CHANGED = 'password_changed',
   TWO_FACTOR_ENABLED = 'two_factor_enabled',
   TWO_FACTOR_DISABLED = 'two_factor_disabled',
+  PROFILE_UPDATED = 'profile_updated',
+  EMAIL_CHANGED = 'email_changed',
+  ACCOUNT_LOCKED = 'account_locked',
+  ACCOUNT_UNLOCKED = 'account_unlocked',
+  UNUSUAL_LOGIN_LOCATION = 'unusual_login_location',
+  PASSWORD_RESET_REQUESTED = 'password_reset_requested',
+  SECURITY_SETTINGS_CHANGED = 'security_settings_changed',
 }
 
 export enum SecurityEventSeverity {

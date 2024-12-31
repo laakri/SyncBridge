@@ -1,27 +1,28 @@
 import { api } from "../lib/api";
 
+export interface User {
+  id: string;
+  email: string;
+  username: string;
+  full_name: string | null;
+  profile_picture_url?: string;
+  created_at: string;
+  last_login: string;
+  email_verified: boolean;
+  subscription_tier: 'free' | 'premium' | 'business';
+  account_status: 'active' | 'suspended' | 'deactivated';
+}
+
 interface AuthResponse {
   access_token: string;
   refresh_token: string;
-  user: {
-    id: string;
-    email: string;
-    username: string;
-    full_name: string | null;
-  };
+  user: User;
   device_id: string;
 }
 
 interface RegisterResponse {
   message: string;
 }
-
-export type User = {
-  id: string;
-  email: string;
-  username: string;
-  full_name: string | null;
-};
 
 export const authService = {
   async login(identifier: string, password: string): Promise<AuthResponse> {

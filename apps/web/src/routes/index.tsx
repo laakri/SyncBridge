@@ -10,6 +10,10 @@ import { AuthPage } from "../components/auth/AuthPage";
 import { VerifyEmailPage } from "../components/auth/VerifyEmailPage";
 import { SyncDashboard } from "../components/sync/SyncDashboard";
 import { DevicesPage } from "../components/sync/DevicesPage";
+import { ProfileDashboard } from "../components/profile/ProfileDashboard";
+import { NotificationSettings } from "../components/profile/settings/NotificationSettings";
+import { PreferenceSettings } from "../components/profile/settings/PreferenceSettings";
+import { SecuritySettings } from "../components/profile/settings/SecuritySettings";
 
 // Root layout route - This is your base layout that wraps all pages
 const rootRoute = createRootRoute({
@@ -39,7 +43,28 @@ export const syncRoute = createRoute({
   path: "/sync",
   component: SyncDashboard,
 });
+export const profileRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/profile",
+  component: ProfileDashboard,
+});
+export const securitySettingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings/security",
+  component: SecuritySettings,
+});
 
+export const notificationsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings/notifications",
+  component: NotificationSettings,
+});
+
+export const preferencesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/settings/preferences",
+  component: PreferenceSettings,
+});
 
 // Export the route
 export const verifyEmailRoute = new Route({
@@ -59,7 +84,11 @@ export const routeTree = rootRoute.addChildren([
   authRoute,
   devicesRoute,
   syncRoute,
+  profileRoute,
   verifyEmailRoute,
+  securitySettingsRoute,
+  notificationsRoute,
+  preferencesRoute,
 ]);
 
 // Create the router instance

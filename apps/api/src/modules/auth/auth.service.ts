@@ -14,13 +14,14 @@ import { v4 as uuidv4 } from 'uuid';
 import * as QRCode from 'qrcode';
 import { Redis } from 'ioredis';
 
-import { User } from '../../entities/user.entity';
+import { AccountStatus, User } from '../../entities/user.entity';
 import { Device, DeviceType, OSType } from '../../entities/device.entity';
 import { DeviceAuthentication } from '../../entities/device-auth.entity';
 import { EmailService } from './email.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import { SecurityEventService } from './security/security-event.service';
 import { parseUserAgent } from '../../utils/user-agent.util';
+import { SecurityEventType } from 'src/entities/security-event.entity';
 
 @Injectable()
 export class AuthService {
@@ -102,49 +103,79 @@ export class AuthService {
     ipAddress: string,
     userAgent: string,
   ): Promise<any> {
-    // Find user by email or username
-    const user = await this.userRepository.findOne({
-      where: [
-        { email: loginDto.identifier },
-        { username: loginDto.identifier },
-      ],
-    });
+    try {
+      // Find user
+      const user = await this.userRepository.findOne({
+        where: [
+          { email: loginDto.identifier },
+          { username: loginDto.identifier },
+        ],
+      });
 
-    if (
-      !user ||
-      !(await bcrypt.compare(loginDto.password, user.password_hash))
-    ) {
-      throw new UnauthorizedException('Invalid credentials');
+      // Validate credentials
+      if (
+        !user ||
+        !(await bcrypt.compare(loginDto.password, user.password_hash))
+      ) {
+        await this.handleFailedLogin(loginDto.identifier, ipAddress, userAgent);
+        throw new UnauthorizedException('Invalid credentials');
+      }
+
+      // Validate login attempt
+      const isValidAttempt = await this.validateLoginAttempt(
+        user,
+        ipAddress,
+        userAgent,
+      );
+      if (!isValidAttempt) {
+        throw new UnauthorizedException(
+          'Account is locked or suspicious activity detected',
+        );
+      }
+
+      if (!user.email_verified) {
+        throw new UnauthorizedException('Please verify your email first');
+      }
+
+      // Handle successful login
+      const device = await this.handleDeviceLogin(
+        user,
+        loginDto.deviceName,
+        ipAddress,
+        userAgent,
+      );
+
+      // Generate tokens
+      const tokens = await this.generateTokens(user, device);
+
+      // Log successful login
+      await this.securityEventService.logLoginEvent(
+        user,
+        device,
+        true,
+        ipAddress,
+      );
+
+      // Update last login
+      user.last_login = new Date();
+      await this.userRepository.save(user);
+
+      return {
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        device_id: device.device_id,
+        user: {
+          id: user.user_id,
+          email: user.email,
+          username: user.username,
+          full_name: user.full_name,
+        },
+      };
+    } catch (error) {
+      // Log any unexpected errors
+      console.error('Login error:', error);
+      throw error;
     }
-
-    if (!user.email_verified) {
-      throw new UnauthorizedException('Please verify your email first');
-    }
-
-    // Create or update device
-    const device = await this.handleDeviceLogin(
-      user,
-      loginDto.deviceName,
-      ipAddress,
-      userAgent,
-    );
-
-    // Generate tokens
-    const tokens = await this.generateTokens(user, device);
-
-    // Log security event
-    await this.securityEventService.logLoginEvent(user, device, true);
-    return {
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      device_id: device.device_id,
-      user: {
-        id: user.user_id,
-        email: user.email,
-        username: user.username,
-        full_name: user.full_name,
-      },
-    };
   }
 
   private async handleDeviceLogin(
@@ -647,5 +678,127 @@ export class AuthService {
         last_active: 'DESC',
       },
     });
+  }
+
+  async lockUserAccount(
+    userId: string,
+    reason: string,
+    ipAddress: string,
+    deviceId?: string,
+  ): Promise<void> {
+    const user = await this.userRepository.findOne({
+      where: { user_id: userId },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Get the device that triggered the lock
+    const device = deviceId
+      ? await this.deviceRepository.findOne({ where: { device_id: deviceId } })
+      : await this.deviceRepository.findOne({
+          where: { user_id: userId },
+          order: { last_active: 'DESC' },
+        });
+
+    // Update user status
+    user.account_status = AccountStatus.SUSPENDED;
+    await this.userRepository.save(user);
+
+    // Log security event
+    await this.securityEventService.logAccountSecurityEvent(
+      user,
+      device,
+      'lock',
+      reason,
+      ipAddress,
+    );
+
+    // Notify user via email
+    await this.emailService.sendAccountLockNotification(user, reason);
+  }
+
+  async handleFailedLogin(
+    identifier: string,
+    ipAddress: string,
+    userAgent: string,
+  ): Promise<void> {
+    const key = `failed_login:${identifier}:${ipAddress}`;
+    const attempts = await this.redis.incr(key);
+    await this.redis.expire(key, 3600); // Reset after 1 hour
+
+    const user = await this.userRepository.findOne({
+      where: [{ email: identifier }, { username: identifier }],
+    });
+
+    if (user) {
+      const device = await this.handleDeviceLogin(
+        user,
+        'Unknown Device',
+        ipAddress,
+        userAgent,
+      );
+
+      await this.securityEventService.logLoginEvent(
+        user,
+        device,
+        false,
+        ipAddress,
+      );
+
+      // If too many failed attempts, lock the account
+      if (attempts >= 5) {
+        await this.lockUserAccount(
+          user.user_id,
+          'Multiple failed login attempts detected',
+          ipAddress,
+          device.device_id,
+        );
+      }
+    }
+  }
+
+  async validateLoginAttempt(
+    user: User,
+    ipAddress: string,
+    userAgent: string,
+  ): Promise<boolean> {
+    const device = await this.handleDeviceLogin(
+      user,
+      'Validation Check',
+      ipAddress,
+      userAgent,
+    );
+
+    // Check if account is locked
+    if (user.account_status !== AccountStatus.ACTIVE) {
+      await this.securityEventService.logLoginEvent(
+        user,
+        device,
+        false,
+        ipAddress,
+      );
+      return false;
+    }
+
+    // Check for suspicious activity
+    const recentEvents = await this.securityEventService.getRecentEvents(user, {
+      limit: 10,
+      eventTypes: [SecurityEventType.LOGIN_FAILED],
+      startDate: new Date(Date.now() - 24 * 60 * 60 * 1000), // Last 24 hours
+    });
+
+    if (recentEvents.length >= 10) {
+      await this.securityEventService.logSuspiciousActivity(
+        user,
+        device,
+        'Multiple failed login attempts detected',
+        ipAddress,
+      );
+      return false;
+    }
+
+    return true;
   }
 }

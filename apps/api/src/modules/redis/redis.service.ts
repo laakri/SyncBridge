@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import { ConfigService } from '@nestjs/config';
+import { Inject } from '@nestjs/common';
 
 export type CacheType =
   | 'clipboard'
@@ -12,44 +13,31 @@ export type CacheType =
 
 @Injectable()
 export class RedisService {
-  private readonly redis: Redis;
   private readonly logger = new Logger('RedisService');
+  private readonly DEFAULT_TTL = 24 * 60 * 60; // 24 hours
 
-  // TTL constants in seconds
-  private readonly TTL = {
-    CLIPBOARD: 24 * 60 * 60, // 24 hours
-    LINK: 24 * 60 * 60, // 24 hours (increased from 1 hour)
-    NOTE: 24 * 60 * 60, // 24 hours (increased from 12 hours)
-    FILE: 7 * 24 * 60 * 60, // 7 days
-    FAVORITES: 24 * 60 * 60, // 24 hours
-    RECENT: 24 * 60 * 60, // 24 hours for recent syncs
+  // Hash keys for different data types
+  private readonly KEYS = {
+    USER_SYNCS: (userId: string) => `user:${userId}:syncs`,
+    USER_RECENT: (userId: string) => `user:${userId}:recent`,
+    USER_FAVORITES: (userId: string) => `user:${userId}:favorites`,
+    USER_STATS: (userId: string) => `user:${userId}:stats`,
   };
 
-  constructor(private readonly configService: ConfigService) {
-    this.redis = new Redis({
-      host: configService.get('REDIS_HOST', 'localhost'),
-      port: configService.get('REDIS_PORT', 6379),
-      password: configService.get('REDIS_PASSWORD'),
-    });
-  }
+  constructor(
+    @Inject(Redis)
+    private readonly redis: Redis,
+  ) {}
 
-  /**
-   * Generate Redis key based on type and IDs
-   */
   private generateKey(
     type: string,
     userId: string,
     identifier?: string,
   ): string {
-    const key = `sync:${type}:${userId}${identifier ? ':' + identifier : ''}`;
-    this.logger.debug(`Generated Redis key: ${key}`);
-    return key;
+    return `sync:${type}:${userId}${identifier ? ':' + identifier : ''}`;
   }
 
-  /**
-   * Cache sync data with appropriate TTL
-   */
-  async cacheSyncData(
+  async set(
     type: CacheType,
     userId: string,
     data: any,
@@ -57,99 +45,101 @@ export class RedisService {
   ): Promise<void> {
     try {
       const key = this.generateKey(type, userId, identifier);
-      const ttl = this.TTL[type.toUpperCase()] || this.TTL.RECENT;
-
-      this.logger.debug(`Caching data for key: ${key} with TTL: ${ttl}`);
-
-      await this.redis.set(key, JSON.stringify(data), 'EX', ttl);
+      await this.redis.set(key, JSON.stringify(data), 'EX', this.DEFAULT_TTL);
     } catch (error) {
-      this.logger.error(
-        `Error caching sync data: ${error.message}`,
-        error.stack,
-      );
+      this.logger.error(`Redis set error: ${error.message}`);
     }
   }
 
-  /**
-   * Cache recent syncs for quick access
-   */
-  async cacheRecentSyncs(userId: string, syncs: any[]): Promise<void> {
-    try {
-      const key = this.generateKey('recent', userId);
-      this.logger.debug(
-        `Caching recent syncs for user ${userId}, count: ${syncs.length}`,
-      );
-
-      await this.redis.set(key, JSON.stringify(syncs), 'EX', this.TTL.RECENT);
-    } catch (error) {
-      this.logger.error(
-        `Error caching recent syncs: ${error.message}`,
-        error.stack,
-      );
-    }
-  }
-
-  /**
-   * Retrieve cached sync data
-   */
-  async getCachedSync(
+  async get(
     type: string,
     userId: string,
     identifier?: string,
   ): Promise<any | null> {
     try {
       const key = this.generateKey(type, userId, identifier);
-      this.logger.debug(`Retrieving cached data for key: ${key}`);
-
       const data = await this.redis.get(key);
-      if (!data) {
-        this.logger.debug(`No cached data found for key: ${key}`);
-        return null;
-      }
-
-      return JSON.parse(data);
+      return data ? JSON.parse(data) : null;
     } catch (error) {
-      this.logger.error(
-        `Error retrieving cached sync: ${error.message}`,
-        error.stack,
-      );
+      this.logger.error(`Redis get error: ${error.message}`);
       return null;
     }
   }
 
-  /**
-   * Remove cached item
-   */
-  async invalidateCache(
+  async delete(
     type: string,
     userId: string,
     identifier?: string,
   ): Promise<void> {
     try {
       const key = this.generateKey(type, userId, identifier);
-      this.logger.debug(`Invalidating cache for key: ${key}`);
       await this.redis.del(key);
     } catch (error) {
-      this.logger.error(
-        `Error invalidating cache: ${error.message}`,
-        error.stack,
-      );
+      this.logger.error(`Redis delete error: ${error.message}`);
     }
   }
 
-  /**
-   * Check if key exists in cache
-   */
-  async exists(
-    type: string,
-    userId: string,
-    identifier?: string,
-  ): Promise<boolean> {
-    const key = this.generateKey(type, userId, identifier);
-    const exists = await this.redis.exists(key);
-    this.logger.debug(
-      `Cache check for key ${key}: ${exists ? 'exists' : 'does not exist'}`,
+  async batchSet(
+    operations: {
+      type: CacheType;
+      userId: string;
+      data: any;
+      identifier?: string;
+    }[],
+  ): Promise<void> {
+    try {
+      const pipeline = this.redis.pipeline();
+
+      operations.forEach((op) => {
+        const key = this.generateKey(op.type, op.userId, op.identifier);
+        pipeline.set(key, JSON.stringify(op.data), 'EX', this.DEFAULT_TTL);
+      });
+
+      await pipeline.exec();
+    } catch (error) {
+      this.logger.error(`Redis batch set error: ${error.message}`);
+    }
+  }
+
+  async addSync(userId: string, sync: any): Promise<void> {
+    const pipeline = this.redis.pipeline();
+
+    // Store sync in hash
+    pipeline.hset(
+      this.KEYS.USER_SYNCS(userId),
+      sync.sync_id,
+      JSON.stringify(sync),
     );
-    return exists === 1;
+
+    // Add to sorted set for recent syncs
+    pipeline.zadd(
+      this.KEYS.USER_RECENT(userId),
+      sync.created_at.getTime(),
+      sync.sync_id,
+    );
+
+    // Update stats
+    pipeline.hincrby(this.KEYS.USER_STATS(userId), sync.content_type, 1);
+
+    await pipeline.exec();
+  }
+
+  async getRecentSyncs(userId: string, limit: number = 10): Promise<any[]> {
+    // Get recent sync IDs from sorted set
+    const syncIds = await this.redis.zrevrange(
+      this.KEYS.USER_RECENT(userId),
+      0,
+      limit - 1,
+    );
+
+    if (!syncIds.length) return [];
+
+    // Get sync data from hash
+    const syncs = await this.redis.hmget(
+      this.KEYS.USER_SYNCS(userId),
+      ...syncIds,
+    );
+
+    return syncs.map((sync) => JSON.parse(sync));
   }
 }

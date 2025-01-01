@@ -12,8 +12,8 @@ import { SyncData, ContentType } from '../../entities/sync-data.entity';
 import { SyncStatus, SyncState } from '../../entities/sync-status.entity';
 import { Device } from '../../entities/device.entity';
 import { WsGateway } from '../ws/ws.gateway';
+import { v4 as uuid } from 'uuid';
 import { RedisService } from '../redis/redis.service';
-import { CacheType } from '../redis/redis.service';
 
 export interface DeviceStats {
   clipboard: number;
@@ -35,7 +35,7 @@ export class SyncService {
     private deviceRepository: Repository<Device>,
     @Inject(forwardRef(() => WsGateway))
     private wsGateway: WsGateway,
-    private readonly redisService: RedisService,
+    private redisService: RedisService,
   ) {}
 
   async createSync(
@@ -56,47 +56,28 @@ export class SyncService {
       throw new NotFoundException('Device not found');
     }
 
+    // Create sync data with required source_device_id
     const syncData = this.syncDataRepository.create({
       user_id: userId,
       source_device_id: deviceId,
+      content_type: data.content_type,
       content: {
         value: data.content,
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
       },
-      content_type: data.content_type,
-      metadata: data.metadata,
+      metadata: data.metadata || {},
       parent_sync_id: data.parent_sync_id,
+      is_deleted: false,
+      is_favorite: false,
       version: 1,
-      size_bytes: Buffer.from(data.content).length,
-      checksum: await this.generateChecksum(data.content),
     });
 
     const savedSync = await this.syncDataRepository.save(syncData);
 
-    // Cache the new sync data
-    await this.redisService.cacheSyncData(
-      data.content_type,
-      userId,
-      {
-        ...savedSync,
-        content: data.content,
-        metadata: data.metadata,
-      },
-      savedSync.sync_id,
-    );
+    // Cache the sync data in Redis
+    await this.redisService.addSync(userId, savedSync);
 
-    // Update recent syncs cache
-    const cachedRecent = await this.redisService.getCachedSync(
-      'recent',
-      userId,
-    );
-    if (cachedRecent) {
-      // Add new sync to the beginning of the array and maintain limit
-      const updatedRecent = [savedSync, ...cachedRecent].slice(0, 50);
-      await this.redisService.cacheRecentSyncs(userId, updatedRecent);
-    }
-
-    // Create initial sync status for source device
+    // Create sync status
     await this.syncStatusRepository.save({
       sync_id: savedSync.sync_id,
       device_id: deviceId,
@@ -105,7 +86,7 @@ export class SyncService {
       version: savedSync.version,
     });
 
-    // Notify other devices about new sync data
+    // Notify other devices
     await this.wsGateway.broadcastToUser(userId, 'sync:new', {
       sync_id: savedSync.sync_id,
       content_type: savedSync.content_type,
@@ -151,32 +132,19 @@ export class SyncService {
     contentType?: ContentType,
     since?: Date,
     limit: number = 50,
-  ) {
-    this.logger.debug(`Fetching recent syncs for user ${userId}`);
-
+  ): Promise<SyncData[]> {
     // Try to get from cache first
-    const cachedSyncs = await this.redisService.getCachedSync('recent', userId);
+    const cachedSyncs = await this.redisService.getRecentSyncs(userId, limit);
 
-    if (cachedSyncs) {
-      this.logger.debug(`Found cached syncs for user ${userId}`);
-      // Filter cached results based on parameters (but don't exclude favorites)
-      const filtered = this.filterCachedSyncs(
-        cachedSyncs,
-        contentType,
-        since,
-        limit,
-      );
-      this.logger.debug(
-        `Returning ${filtered.length} filtered syncs from cache`,
-      );
-      return filtered;
+    if (cachedSyncs?.length) {
+      // Filter cached results
+      return this.filterCachedSyncs(cachedSyncs, contentType, since, limit);
     }
-
-    this.logger.debug(`No cache found, querying database for user ${userId}`);
 
     // If not in cache, get from database
     const query = this.syncDataRepository
       .createQueryBuilder('sync')
+      .leftJoinAndSelect('sync.sourceDevice', 'device')
       .where('sync.user_id = :userId', { userId })
       .andWhere('sync.is_deleted = false');
 
@@ -193,10 +161,10 @@ export class SyncService {
       .take(limit)
       .getMany();
 
-    this.logger.debug(`Found ${syncs.length} syncs in database`);
-
     // Cache the results
-    await this.redisService.cacheRecentSyncs(userId, syncs);
+    await Promise.all(
+      syncs.map((sync) => this.redisService.addSync(userId, sync)),
+    );
 
     return syncs;
   }
@@ -234,8 +202,6 @@ export class SyncService {
       .andWhere('sync.is_deleted = false')
       .groupBy('sync.content_type')
       .getRawMany();
-
-    console.log('Device stats:', stats);
 
     return {
       clipboard: parseInt(
@@ -279,33 +245,6 @@ export class SyncService {
     sync.is_favorite = !sync.is_favorite;
     await this.syncDataRepository.save(sync);
 
-    // Update recent syncs cache - just update the favorite status
-    const cachedRecent = await this.redisService.getCachedSync(
-      'recent',
-      userId,
-    );
-    if (cachedRecent) {
-      const updatedRecent = cachedRecent.map((item) =>
-        item.sync_id === syncId
-          ? { ...item, is_favorite: sync.is_favorite }
-          : item,
-      );
-      await this.redisService.cacheRecentSyncs(userId, updatedRecent);
-    }
-
-    // Update favorites cache
-    const favorites = await this.getFavoriteSyncs(userId);
-    await this.redisService.cacheSyncData(
-      'favorites' as CacheType,
-      userId,
-      favorites,
-    );
-
-    console.log('[SyncService] Updated favorite status:', {
-      syncId,
-      isFavorite: sync.is_favorite,
-    });
-
     return sync.is_favorite;
   }
 
@@ -327,11 +266,6 @@ export class SyncService {
     sync.is_deleted = true;
     await this.syncDataRepository.save(sync);
 
-    // Invalidate related caches
-    await this.redisService.invalidateCache('sync', userId, syncId);
-    await this.redisService.invalidateCache('recent', userId);
-
-    console.log('[SyncService] Sync marked as deleted:', syncId);
     return true;
   }
 }

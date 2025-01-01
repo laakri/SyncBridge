@@ -13,12 +13,14 @@ import { JwtAuthGuard } from './modules/auth/guards/jwt-auth.guard';
 import { WsModule } from './modules/ws/ws.module';
 import { DevicesModule } from './modules/devices/devices.module';
 import { ProfileModule } from './modules/profile/profile.module';
+import { RedisModule } from './modules/redis/redis.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    RedisModule,
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: (configService: ConfigService) => ({

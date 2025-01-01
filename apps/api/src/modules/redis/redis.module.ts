@@ -12,14 +12,23 @@ import { RedisService } from './redis.service';
           host: configService.get('REDIS_HOST', 'localhost'),
           port: configService.get('REDIS_PORT', 6379),
           password: configService.get('REDIS_PASSWORD'),
-          retryStrategy: (times) => {
-            const delay = Math.min(times * 50, 2000);
-            return delay;
-          },
+          retryStrategy: (times) => Math.min(times * 50, 2000),
+          connectTimeout: 10000,
+          maxRetriesPerRequest: 3,
+          enableReadyCheck: false,
+          showFriendlyErrorStack: true,
+          lazyConnect: true,
+          commandTimeout: 5000,
+          keepAlive: 5000,
+          db: 0,
         });
 
         redis.on('error', (err) => {
           console.error('Redis connection error:', err);
+        });
+
+        redis.on('connect', () => {
+          console.log('Successfully connected to Redis');
         });
 
         return redis;

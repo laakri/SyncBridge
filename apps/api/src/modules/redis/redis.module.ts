@@ -12,14 +12,23 @@ import { RedisService } from './redis.service';
           host: configService.get('REDIS_HOST', 'localhost'),
           port: configService.get('REDIS_PORT', 6379),
           password: configService.get('REDIS_PASSWORD'),
-          retryStrategy: (times) => Math.min(times * 50, 2000),
-          connectTimeout: 10000,
-          maxRetriesPerRequest: 3,
-          enableReadyCheck: false,
-          showFriendlyErrorStack: true,
-          lazyConnect: true,
-          commandTimeout: 5000,
-          keepAlive: 5000,
+          retryStrategy: (times) => {
+            const delay = Math.min(times * 100, 3000);
+            return delay;
+          },
+          maxRetriesPerRequest: 5,
+          connectTimeout: 20000,
+          commandTimeout: 10000,
+          keepAlive: 10000,
+          enableReadyCheck: true,
+          enableOfflineQueue: true,
+          reconnectOnError: (err) => {
+            const targetError = 'READONLY';
+            if (err.message.includes(targetError)) {
+              return true;
+            }
+            return false;
+          },
           db: 0,
         });
 
@@ -29,6 +38,14 @@ import { RedisService } from './redis.service';
 
         redis.on('connect', () => {
           console.log('Successfully connected to Redis');
+        });
+
+        redis.on('ready', () => {
+          console.log('Redis client ready');
+        });
+
+        redis.on('reconnecting', () => {
+          console.log('Redis client reconnecting');
         });
 
         return redis;

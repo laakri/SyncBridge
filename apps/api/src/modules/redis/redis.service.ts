@@ -125,21 +125,38 @@ export class RedisService {
   }
 
   async getRecentSyncs(userId: string, limit: number = 10): Promise<any[]> {
-    // Get recent sync IDs from sorted set
-    const syncIds = await this.redis.zrevrange(
-      this.KEYS.USER_RECENT(userId),
-      0,
-      limit - 1,
-    );
+    try {
+      const pipeline = this.redis.pipeline();
 
-    if (!syncIds.length) return [];
+      // Get recent sync IDs with timeout
+      const syncIds = (await Promise.race([
+        this.redis.zrevrange(this.KEYS.USER_RECENT(userId), 0, limit - 1),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Redis operation timed out')),
+            5000,
+          ),
+        ),
+      ])) as string[];
 
-    // Get sync data from hash
-    const syncs = await this.redis.hmget(
-      this.KEYS.USER_SYNCS(userId),
-      ...syncIds,
-    );
+      if (!syncIds.length) return [];
 
-    return syncs.map((sync) => JSON.parse(sync));
+      // Get sync data from hash
+      const syncs = await Promise.race([
+        this.redis.hmget(this.KEYS.USER_SYNCS(userId), ...syncIds),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error('Redis operation timed out')),
+            5000,
+          ),
+        ),
+      ]);
+      return (syncs as string[])
+        .filter((sync) => sync != null)
+        .map((sync) => JSON.parse(sync));
+    } catch (error) {
+      this.logger.error(`Redis getRecentSyncs error: ${error.message}`);
+      return []; // Return empty array as fallback
+    }
   }
 }

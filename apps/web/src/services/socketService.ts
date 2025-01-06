@@ -5,6 +5,19 @@ class SocketService {
   private socket: Socket | null = null;
   private reconnectAttempts = 0;
   private readonly MAX_RECONNECT_ATTEMPTS = 3;
+  private isRefreshing = false;
+  private refreshSubscribers: ((token: string) => void)[] = [];
+
+  private processQueue(error: any, token: string | null = null) {
+    this.refreshSubscribers.forEach((callback) => {
+      if (error) {
+        this.disconnect();
+      } else {
+        callback(token!);
+      }
+    });
+    this.refreshSubscribers = [];
+  }
 
   private async refreshToken() {
     try {
@@ -46,17 +59,19 @@ class SocketService {
 
     const token = localStorage.getItem('access_token');
     const deviceId = localStorage.getItem('current_device_id');
+    const refreshToken = localStorage.getItem('refresh_token');
 
     console.log('[Socket] Connecting with:', { 
       hasToken: !!token, 
+      hasRefreshToken: !!refreshToken,
       deviceId 
     });
 
     if (!token || !deviceId) {
-      if (localStorage.getItem('refresh_token')) {
+      if (refreshToken) {
         try {
           const newToken = await this.refreshToken();
-          return this.createSocketConnection(newToken, deviceId!);
+          return this.createSocketConnection(newToken, deviceId!, refreshToken);
         } catch (error) {
           console.error('[Socket] Token refresh failed:', error);
           throw error;
@@ -65,10 +80,10 @@ class SocketService {
       throw new Error('No authentication tokens found');
     }
 
-    return this.createSocketConnection(token, deviceId);
+    return this.createSocketConnection(token, deviceId, refreshToken!);
   }
 
-  private createSocketConnection(token: string, deviceId: string) {
+  private createSocketConnection(token: string, deviceId: string, refreshToken: string) {
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
@@ -78,21 +93,19 @@ class SocketService {
     console.log('[Socket] Creating connection to:', wsUrl);
 
     this.socket = io(wsUrl, {
-      transports: ['polling', 'websocket'],
+      transports: ['websocket', 'polling'],
       path: '/socket.io/',
       auth: {
         token: `Bearer ${token}`,
-        deviceId
+        deviceId,
+        refreshToken
       },
       reconnection: true,
       reconnectionAttempts: this.MAX_RECONNECT_ATTEMPTS,
       reconnectionDelay: 1000,
       timeout: 10000,
       forceNew: true,
-      withCredentials: true,
-      extraHeaders: {
-        'Access-Control-Allow-Credentials': 'true',
-      }
+      withCredentials: true
     });
 
     return new Promise<Socket>((resolve, reject) => {
@@ -104,43 +117,78 @@ class SocketService {
         resolve(this.socket!);
       });
 
+      this.socket.on('tokens:refresh', ({ access_token, refresh_token }) => {
+        console.log('[Socket] Received new tokens from server');
+        localStorage.setItem('access_token', access_token);
+        localStorage.setItem('refresh_token', refresh_token);
+        this.processQueue(null, access_token);
+      });
+
       this.socket.on('connect_error', async (error) => {
         console.error('[Socket] Connection error:', error.message);
         
-        if (error.message.includes('Unauthorized') && this.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
-          this.reconnectAttempts++;
-          try {
-            console.log('[Socket] Attempting token refresh...');
-            const newToken = await this.refreshToken();
-            this.socket?.disconnect();
-            resolve(await this.createSocketConnection(newToken, deviceId));
-          } catch (refreshError) {
-            reject(refreshError);
+        if (error.message.includes('Unauthorized')) {
+          if (this.isRefreshing) {
+            // Wait for the refresh to complete
+            try {
+              const token = await new Promise<string>((resolve) => {
+                this.refreshSubscribers.push(resolve);
+              });
+              this.socket?.disconnect();
+              resolve(await this.createSocketConnection(token, deviceId, refreshToken));
+            } catch (err) {
+              reject(err);
+            }
+            return;
+          }
+
+          if (this.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
+            this.reconnectAttempts++;
+            this.isRefreshing = true;
+            try {
+              console.log('[Socket] Attempting token refresh...');
+              const newToken = await this.refreshToken();
+              this.isRefreshing = false;
+              this.socket?.disconnect();
+              resolve(await this.createSocketConnection(newToken, deviceId, refreshToken));
+            } catch (refreshError) {
+              this.isRefreshing = false;
+              this.processQueue(refreshError);
+              reject(refreshError);
+            }
+          } else {
+            reject(error);
           }
         } else {
           reject(error);
         }
       });
 
-      this.socket.on('disconnect', (reason) => {
-        console.log('[Socket] Disconnected:', reason);
-        if (reason === 'io server disconnect') {
-          this.socket?.connect();
-        }
-      });
-
-      this.socket.on('error', (error) => {
-        console.error('[Socket] Transport error:', error);
-      });
-
-      setTimeout(() => {
-        if (this.socket && !this.socket.connected) {
-          console.log('[Socket] Connection timeout, falling back to polling');
-          this.socket.disconnect();
-          this.socket.connect();
-        }
-      }, 5000);
+      this.setupDisconnectHandlers();
     });
+  }
+
+  private setupDisconnectHandlers() {
+    if (!this.socket) return;
+
+    this.socket.on('disconnect', (reason) => {
+      console.log('[Socket] Disconnected:', reason);
+      if (reason === 'io server disconnect') {
+        this.socket?.connect();
+      }
+    });
+
+    this.socket.on('error', (error) => {
+      console.error('[Socket] Transport error:', error);
+    });
+
+    setTimeout(() => {
+      if (this.socket && !this.socket.connected) {
+        console.log('[Socket] Connection timeout, falling back to polling');
+        this.socket.disconnect();
+        this.socket.connect();
+      }
+    }, 5000);
   }
 
   disconnect() {
@@ -148,6 +196,8 @@ class SocketService {
       this.socket.disconnect();
       this.socket = null;
       this.reconnectAttempts = 0;
+      this.isRefreshing = false;
+      this.refreshSubscribers = [];
     }
   }
 

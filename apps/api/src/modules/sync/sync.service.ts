@@ -13,7 +13,6 @@ import { SyncStatus, SyncState } from '../../entities/sync-status.entity';
 import { Device } from '../../entities/device.entity';
 import { WsGateway } from '../ws/ws.gateway';
 import { v4 as uuid } from 'uuid';
-import { RedisService } from '../redis/redis.service';
 
 export interface DeviceStats {
   clipboard: number;
@@ -35,7 +34,6 @@ export class SyncService {
     private deviceRepository: Repository<Device>,
     @Inject(forwardRef(() => WsGateway))
     private wsGateway: WsGateway,
-    private redisService: RedisService,
   ) {}
 
   async createSync(
@@ -56,7 +54,6 @@ export class SyncService {
       throw new NotFoundException('Device not found');
     }
 
-    // Create sync data with required source_device_id
     const syncData = this.syncDataRepository.create({
       user_id: userId,
       source_device_id: deviceId,
@@ -74,10 +71,6 @@ export class SyncService {
 
     const savedSync = await this.syncDataRepository.save(syncData);
 
-    // Cache the sync data in Redis
-    await this.redisService.addSync(userId, savedSync);
-
-    // Create sync status
     await this.syncStatusRepository.save({
       sync_id: savedSync.sync_id,
       device_id: deviceId,
@@ -86,7 +79,6 @@ export class SyncService {
       version: savedSync.version,
     });
 
-    // Notify other devices
     await this.wsGateway.broadcastToUser(userId, 'sync:new', {
       sync_id: savedSync.sync_id,
       content_type: savedSync.content_type,
@@ -94,6 +86,30 @@ export class SyncService {
     });
 
     return savedSync;
+  }
+
+  async getRecentSyncs(
+    userId: string,
+    deviceId: string,
+    contentType?: ContentType,
+    since?: Date,
+    limit: number = 50,
+  ): Promise<SyncData[]> {
+    const query = this.syncDataRepository
+      .createQueryBuilder('sync')
+      .leftJoinAndSelect('sync.sourceDevice', 'device')
+      .where('sync.user_id = :userId', { userId })
+      .andWhere('sync.is_deleted = false');
+
+    if (contentType) {
+      query.andWhere('sync.content_type = :contentType', { contentType });
+    }
+
+    if (since) {
+      query.andWhere('sync.created_at > :since', { since });
+    }
+
+    return query.orderBy('sync.created_at', 'DESC').take(limit).getMany();
   }
 
   async updateSyncStatus(
@@ -124,68 +140,6 @@ export class SyncService {
       last_successful_sync: state === 'COMPLETED' ? new Date() : undefined,
       version: 1,
     });
-  }
-
-  async getRecentSyncs(
-    userId: string,
-    deviceId: string,
-    contentType?: ContentType,
-    since?: Date,
-    limit: number = 50,
-  ): Promise<SyncData[]> {
-    // Try to get from cache first
-    const cachedSyncs = await this.redisService.getRecentSyncs(userId, limit);
-
-    if (cachedSyncs?.length) {
-      // Filter cached results
-      return this.filterCachedSyncs(cachedSyncs, contentType, since, limit);
-    }
-
-    // If not in cache, get from database
-    const query = this.syncDataRepository
-      .createQueryBuilder('sync')
-      .leftJoinAndSelect('sync.sourceDevice', 'device')
-      .where('sync.user_id = :userId', { userId })
-      .andWhere('sync.is_deleted = false');
-
-    if (contentType) {
-      query.andWhere('sync.content_type = :contentType', { contentType });
-    }
-
-    if (since) {
-      query.andWhere('sync.created_at > :since', { since });
-    }
-
-    const syncs = await query
-      .orderBy('sync.created_at', 'DESC')
-      .take(limit)
-      .getMany();
-
-    // Cache the results
-    await Promise.all(
-      syncs.map((sync) => this.redisService.addSync(userId, sync)),
-    );
-
-    return syncs;
-  }
-
-  private filterCachedSyncs(
-    syncs: any[],
-    contentType?: ContentType,
-    since?: Date,
-    limit: number = 50,
-  ) {
-    let filtered = syncs;
-
-    if (contentType) {
-      filtered = filtered.filter((sync) => sync.content_type === contentType);
-    }
-
-    if (since) {
-      filtered = filtered.filter((sync) => new Date(sync.created_at) > since);
-    }
-
-    return filtered.slice(0, limit);
   }
 
   private async generateChecksum(content: string): Promise<string> {

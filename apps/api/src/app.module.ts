@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { configuration, Configuration } from './config/configuration';
 import { AuthModule } from './modules/auth/auth.module';
 import { User } from './entities/user.entity';
 import { Device } from './entities/device.entity';
@@ -14,32 +15,40 @@ import { WsModule } from './modules/ws/ws.module';
 import { DevicesModule } from './modules/devices/devices.module';
 import { ProfileModule } from './modules/profile/profile.module';
 import { RedisModule } from './modules/redis/redis.module';
+import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      load: [configuration],
     }),
     RedisModule,
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        type: 'postgres',
-        host: configService.get('DB_HOST', 'localhost'),
-        port: configService.get('DB_PORT', 5432),
-        username: configService.get('DB_USERNAME', 'postgres'),
-        password: configService.get('DB_PASSWORD', 'postgres'),
-        database: configService.get('DB_NAME', 'syncbridge'),
-        entities: [
-          User,
-          Device,
-          DeviceAuthentication,
-          SecurityEvent,
-          SyncStatus,
-          SyncData,
-        ],
-        synchronize: configService.get('NODE_ENV') !== 'production',
-      }),
+      useFactory: async (
+        configService: ConfigService<Configuration>,
+      ): Promise<TypeOrmModuleOptions> => {
+        const dbConfig = configService.get('database');
+        return {
+          type: 'postgres',
+          host: dbConfig.host,
+          port: dbConfig.port,
+          username: dbConfig.username,
+          password: dbConfig.password,
+          database: dbConfig.name,
+          synchronize: dbConfig.synchronize,
+          entities: [
+            User,
+            Device,
+            DeviceAuthentication,
+            SecurityEvent,
+            SyncStatus,
+            SyncData,
+          ],
+          logging: process.env.NODE_ENV !== 'production',
+        };
+      },
       inject: [ConfigService],
     }),
     WsModule,

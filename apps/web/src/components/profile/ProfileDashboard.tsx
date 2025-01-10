@@ -9,6 +9,7 @@ import { cn } from "../../lib/utils";
 import defaultAvatar from "../../assets/default-avatar.png";
 import { useNavigate } from "@tanstack/react-router";
 import { EditProfileModal } from "./EditProfileModal";
+import { toast } from 'react-hot-toast';
 
 function formatBytes(bytes: number): string {
   const gb = bytes / (1024 * 1024 * 1024);
@@ -32,6 +33,7 @@ export function ProfileDashboard() {
       setProfile(data);
     } catch (error) {
       console.error('Failed to load profile data:', error);
+      toast.error('Failed to load profile data');
     } finally {
       setIsLoading(false);
     }
